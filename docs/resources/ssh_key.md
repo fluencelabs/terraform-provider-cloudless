@@ -22,7 +22,7 @@ resource "cloudless_ssh_key" "me" {
 
 ### Required
 
-- `name` (String) Human-readable name shown in the Fluence UI and CLI.
+- `name` (String) Human-readable name shown in the Fluence UI and CLI. Changing forces replacement; the Fluence API has no rename endpoint.
 - `public_key` (String) The OpenSSH-formatted public key (ECDSA / RSA / ED25519).
 
 ### Read-Only
