@@ -32,6 +32,10 @@ checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
   algorithm: sha256
 
+# Version stamped on `--snapshot` (edge) builds, which have no git tag.
+snapshot:
+  version_template: "0.0.0-edge-{{ .ShortCommit }}"
+
 signs:
   - artifacts: checksum
     args:
@@ -44,6 +48,8 @@ signs:
       - "${artifact}"
 
 release:
+  # release-please creates the GitHub Release (with changelog); append binaries to it.
+  mode: append
   extra_files:
     - glob: "terraform-registry-manifest.json"
       name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
