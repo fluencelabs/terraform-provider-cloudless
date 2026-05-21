@@ -2,7 +2,7 @@ name: edge
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
 
 # Cancel an in-flight edge build if a newer commit lands.
 concurrency:
