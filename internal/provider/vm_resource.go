@@ -146,8 +146,10 @@ func (r *vmResource) Configure(_ context.Context, req resource.ConfigureRequest,
 
 // bootDiskToAPI translates the Terraform boot_disk block into a VMBootDisk for
 // the Fluence API: existing storage_id wins; otherwise the inline-create
-// fields are required as a set.
-func bootDiskToAPI(d *vmBootDiskModel) (client.VMBootDisk, error) {
+// fields are required as a set. The inline-create variant is a
+// CreateUserStorageRequest, which carries its own clusterId — it inherits the
+// VM's cluster, passed in here.
+func bootDiskToAPI(d *vmBootDiskModel, clusterID string) (client.VMBootDisk, error) {
 	if d == nil {
 		return client.VMBootDisk{}, fmt.Errorf("boot_disk block is required")
 	}
@@ -159,6 +161,7 @@ func bootDiskToAPI(d *vmBootDiskModel) (client.VMBootDisk, error) {
 		return client.VMBootDisk{}, fmt.Errorf("inline boot_disk requires name, storage_type, volume_gb, and replicated")
 	}
 	return client.VMBootDisk{Create: &client.CreateUserStorageInline{
+		ClusterID:   clusterID,
 		Name:        d.Name.ValueString(),
 		StorageType: d.StorageType.ValueString(),
 		VolumeGb:    uint32(d.VolumeGb.ValueInt64()),
@@ -176,7 +179,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		return
 	}
 
-	bd, err := bootDiskToAPI(plan.BootDisk)
+	bd, err := bootDiskToAPI(plan.BootDisk, plan.ClusterID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddAttributeError(path.Root("boot_disk"), "Invalid boot_disk", err.Error())
 		return
