@@ -8,6 +8,8 @@ description: |-
 
 The cloudless provider manages compute resources on the [Fluence](https://fluence.dev) decentralized compute marketplace, including VMs, networking (VPC / subnet / security groups / public IPs), and block storage.
 
+For a complete, standalone project you can clone and run, see [fluencelabs/terraform-provider-example](https://github.com/fluencelabs/terraform-provider-example).
+
 ## Example usage
 
 ```terraform
