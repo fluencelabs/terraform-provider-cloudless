@@ -59,8 +59,19 @@ func (s *Server) wireVMs() {
 			if json.Unmarshal(body.BootDisk, &asString) == nil {
 				rec.BootDisk = asString
 			} else {
-				// Inline create: synthesize a storage ID.
-				rec.BootDisk = newID()
+				// Inline create: synthesize a boot storage volume and record it
+				// as a first-class BOOT storage, mirroring the real API. VM
+				// terminate does NOT cascade-delete it, so the provider must
+				// delete it explicitly on destroy.
+				bootID := newID()
+				rec.BootDisk = bootID
+				if s.storageMap == nil {
+					s.storageMap = map[string]*storageRecord{}
+				}
+				s.storageMap[bootID] = &storageRecord{
+					ID: bootID, ClusterID: body.ClusterID, Name: body.Name + "-boot",
+					StorageType: "NVME", UserID: "test-user", Status: "ready", Role: "BOOT",
+				}
 			}
 			// Auto-create one network interface so the network_interface_ids
 			// list is populated from a Get response.
