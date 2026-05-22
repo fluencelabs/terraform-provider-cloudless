@@ -353,6 +353,20 @@ func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, res
 		return nil
 	}); err != nil {
 		resp.Diagnostics.AddError("Waiting for VM termination failed", err.Error())
+		return
+	}
+
+	// An inline-create boot disk is owned by this VM (it is not a separate
+	// cloudless_storage resource), and VM terminate does not cascade it, so it
+	// would otherwise be orphaned. Delete it now that the VM is gone. Skip when
+	// boot_disk references an existing storage_id — that volume is managed
+	// elsewhere and must not be deleted here.
+	if bd := state.BootDisk; bd != nil &&
+		(bd.StorageID.IsNull() || bd.StorageID.ValueString() == "") &&
+		!state.BootDiskID.IsNull() && state.BootDiskID.ValueString() != "" {
+		if err := r.c.DeleteStorage(ctx, state.BootDiskID.ValueString()); err != nil && !client.IsNotFound(err) {
+			resp.Diagnostics.AddError("Deleting boot disk failed", err.Error())
+		}
 	}
 }
 
