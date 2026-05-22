@@ -374,6 +374,7 @@ func (b VMBootDisk) MarshalJSON() ([]byte, error) {
 }
 
 type CreateUserStorageInline struct {
+	ClusterID   string `json:"clusterId"`
 	Name        string `json:"name"`
 	StorageType string `json:"storageType"`
 	VolumeGb    uint32 `json:"volumeGb"`
