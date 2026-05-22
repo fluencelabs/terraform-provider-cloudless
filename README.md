@@ -53,6 +53,9 @@ boot disk, and a small VM that references the storage by ID.
 Per-resource and per-data-source examples live in `examples/resources/` and
 `examples/data-sources/`.
 
+For a complete, standalone project you can clone and run, see
+[fluencelabs/terraform-provider-example](https://github.com/fluencelabs/terraform-provider-example).
+
 ## Local development
 
 This repo ships a Nix flake with all tooling:
