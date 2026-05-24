@@ -20,7 +20,12 @@ func (regionCodeValidator) Description(_ context.Context) string {
 func (v regionCodeValidator) MarkdownDescription(ctx context.Context) string {
 	return v.Description(ctx)
 }
-func (regionCodeValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+
+func (regionCodeValidator) ValidateString(
+	_ context.Context,
+	req validator.StringRequest,
+	resp *validator.StringResponse,
+) {
 	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
 		return
 	}
@@ -29,6 +34,10 @@ func (regionCodeValidator) ValidateString(_ context.Context, req validator.Strin
 		return
 	}
 	if !regionPattern.MatchString(v) {
-		resp.Diagnostics.AddAttributeError(req.Path, "Invalid region code", "expected 2 uppercase letters (ISO 3166-1 alpha-2), got "+v)
+		resp.Diagnostics.AddAttributeError(
+			req.Path,
+			"Invalid region code",
+			"expected 2 uppercase letters (ISO 3166-1 alpha-2), got "+v,
+		)
 	}
 }

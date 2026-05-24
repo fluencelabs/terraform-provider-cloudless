@@ -2,7 +2,7 @@ package provider
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -109,15 +109,27 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 				},
 				Validators: []validator.List{listvalidator.ValueStringsAre(validators.UUID())},
 			},
-			"status":                schema.StringAttribute{Computed: true},
-			"user_id":               schema.StringAttribute{Computed: true},
-			"boot_disk_id":          schema.StringAttribute{Computed: true},
-			"subnet_ids":            schema.ListAttribute{ElementType: types.StringType, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
-			"network_interface_ids": schema.ListAttribute{ElementType: types.StringType, Computed: true, PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()}},
-			"public_ip_id":          schema.StringAttribute{Computed: true, Description: "ID of the attached public IP, if any. Manage attachment via cloudless_vm_public_ip_attachment.", PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
-			"restart_required":      schema.BoolAttribute{Computed: true},
-			"created_at":            schema.StringAttribute{Computed: true},
-			"updated_at":            schema.StringAttribute{Computed: true},
+			"status":       schema.StringAttribute{Computed: true},
+			"user_id":      schema.StringAttribute{Computed: true},
+			"boot_disk_id": schema.StringAttribute{Computed: true},
+			"subnet_ids": schema.ListAttribute{
+				ElementType:   types.StringType,
+				Computed:      true,
+				PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()},
+			},
+			"network_interface_ids": schema.ListAttribute{
+				ElementType:   types.StringType,
+				Computed:      true,
+				PlanModifiers: []planmodifier.List{listplanmodifier.UseStateForUnknown()},
+			},
+			"public_ip_id": schema.StringAttribute{
+				Computed:      true,
+				Description:   "ID of the attached public IP, if any. Manage attachment via cloudless_vm_public_ip_attachment.",
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"restart_required": schema.BoolAttribute{Computed: true},
+			"created_at":       schema.StringAttribute{Computed: true},
+			"updated_at":       schema.StringAttribute{Computed: true},
 		},
 		Blocks: map[string]schema.Block{
 			"boot_disk": schema.SingleNestedBlock{
@@ -129,11 +141,28 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 						PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 						Validators:    []validator.String{validators.UUID()},
 					},
-					"name":         schema.StringAttribute{Optional: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
-					"storage_type": schema.StringAttribute{Optional: true, Validators: []validator.String{stringvalidator.OneOf("NVME")}, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
-					"volume_gb":    schema.Int64Attribute{Optional: true, PlanModifiers: []planmodifier.Int64{int64planmodifier.RequiresReplace()}},
-					"replicated":   schema.BoolAttribute{Optional: true, PlanModifiers: []planmodifier.Bool{boolplanmodifier.RequiresReplace()}},
-					"os_image":     schema.StringAttribute{Optional: true, Description: "URL of an OS image (only valid for inline-create boot disk).", PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
+					"name": schema.StringAttribute{
+						Optional:      true,
+						PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+					},
+					"storage_type": schema.StringAttribute{
+						Optional:      true,
+						Validators:    []validator.String{stringvalidator.OneOf("NVME")},
+						PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+					},
+					"volume_gb": schema.Int64Attribute{
+						Optional:      true,
+						PlanModifiers: []planmodifier.Int64{int64planmodifier.RequiresReplace()},
+					},
+					"replicated": schema.BoolAttribute{
+						Optional:      true,
+						PlanModifiers: []planmodifier.Bool{boolplanmodifier.RequiresReplace()},
+					},
+					"os_image": schema.StringAttribute{
+						Optional:      true,
+						Description:   "URL of an OS image (only valid for inline-create boot disk).",
+						PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+					},
 				},
 			},
 		},
@@ -151,14 +180,16 @@ func (r *vmResource) Configure(_ context.Context, req resource.ConfigureRequest,
 // VM's cluster, passed in here.
 func bootDiskToAPI(d *vmBootDiskModel, clusterID string) (client.VMBootDisk, error) {
 	if d == nil {
-		return client.VMBootDisk{}, fmt.Errorf("boot_disk block is required")
+		return client.VMBootDisk{}, errors.New("boot_disk block is required")
 	}
 	if !d.StorageID.IsNull() && !d.StorageID.IsUnknown() && d.StorageID.ValueString() != "" {
 		s := d.StorageID.ValueString()
 		return client.VMBootDisk{StorageID: &s}, nil
 	}
 	if d.Name.IsNull() || d.StorageType.IsNull() || d.VolumeGb.IsNull() || d.Replicated.IsNull() {
-		return client.VMBootDisk{}, fmt.Errorf("inline boot_disk requires name, storage_type, volume_gb, and replicated")
+		return client.VMBootDisk{}, errors.New(
+			"inline boot_disk requires name, storage_type, volume_gb, and replicated",
+		)
 	}
 	return client.VMBootDisk{Create: &client.CreateUserStorageInline{
 		ClusterID:   clusterID,
@@ -202,20 +233,12 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	}
 
 	id := out.ID
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetVM(ctx, id)
-		if err != nil {
-			return err
-		}
-		out = got
-		if isReady(got.Status) {
-			return errStopPolling
-		}
-		if terminalFailure(got.Status) {
-			return fmt.Errorf("vm %s entered terminal status %q", id, got.Status)
-		}
-		return nil
-	}); err != nil {
+	out, err = pollUntilReady(ctx,
+		func(ctx context.Context) (*client.VM, error) { return r.c.GetVM(ctx, id) },
+		func(v *client.VM) string { return v.Status },
+		"vm "+id,
+	)
+	if err != nil {
 		resp.Diagnostics.AddError("Waiting for VM failed", err.Error())
 		return
 	}
@@ -269,27 +292,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 
 	// data_disk_ids smart Update: diff old vs new and call /storages/add and
 	// /storages/remove. The API does not accept a "set" operation.
-	oldIDs := stringsFromList(state.DataDiskIDs)
-	newIDs := stringsFromList(plan.DataDiskIDs)
-	oldSet := map[string]bool{}
-	for _, s := range oldIDs {
-		oldSet[s] = true
-	}
-	newSet := map[string]bool{}
-	for _, s := range newIDs {
-		newSet[s] = true
-	}
-	var toAdd, toRemove []string
-	for _, s := range newIDs {
-		if !oldSet[s] {
-			toAdd = append(toAdd, s)
-		}
-	}
-	for _, s := range oldIDs {
-		if !newSet[s] {
-			toRemove = append(toRemove, s)
-		}
-	}
+	toAdd, toRemove := diffStrings(stringsFromList(state.DataDiskIDs), stringsFromList(plan.DataDiskIDs))
 	refreshAndSet := func() {
 		got, err := r.c.GetVM(ctx, id)
 		if err != nil {
@@ -336,22 +339,11 @@ func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, res
 		resp.Diagnostics.AddError("Terminate VM failed", err.Error())
 		return
 	}
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetVM(ctx, id)
-		if err != nil {
-			if client.IsNotFound(err) {
-				return errStopPolling
-			}
-			return err
-		}
-		if isRemoved(got.Status) {
-			return errStopPolling
-		}
-		if terminalFailure(got.Status) {
-			return fmt.Errorf("vm %s entered terminal status %q during delete", id, got.Status)
-		}
-		return nil
-	}); err != nil {
+	if err := pollUntilGone(ctx,
+		func(ctx context.Context) (*client.VM, error) { return r.c.GetVM(ctx, id) },
+		func(v *client.VM) string { return v.Status },
+		"vm "+id,
+	); err != nil {
 		resp.Diagnostics.AddError("Waiting for VM termination failed", err.Error())
 		return
 	}
@@ -370,7 +362,11 @@ func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, res
 	}
 }
 
-func (r *vmResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *vmResource) ImportState(
+	ctx context.Context,
+	req resource.ImportStateRequest,
+	resp *resource.ImportStateResponse,
+) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 

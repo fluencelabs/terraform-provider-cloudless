@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -90,20 +89,12 @@ func (r *vpcResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	id := out.ID
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetVPC(ctx, id)
-		if err != nil {
-			return err
-		}
-		out = got
-		if isReady(got.Status) {
-			return errStopPolling
-		}
-		if terminalFailure(got.Status) {
-			return fmt.Errorf("vpc %s entered terminal status %q", id, got.Status)
-		}
-		return nil
-	}); err != nil {
+	out, err = pollUntilReady(ctx,
+		func(ctx context.Context) (*client.VPC, error) { return r.c.GetVPC(ctx, id) },
+		func(v *client.VPC) string { return v.Status },
+		"vpc "+id,
+	)
+	if err != nil {
 		resp.Diagnostics.AddError("Waiting for VPC failed", err.Error())
 		return
 	}
@@ -184,32 +175,19 @@ func (r *vpcResource) Delete(ctx context.Context, req resource.DeleteRequest, re
 	}
 
 	id := state.ID.ValueString()
-	if err := r.c.DeleteVPC(ctx, id); err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("Delete VPC failed", err.Error())
-		return
-	}
-
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetVPC(ctx, id)
-		if err != nil {
-			if client.IsNotFound(err) {
-				return errStopPolling
-			}
-			return err
-		}
-		if isRemoved(got.Status) {
-			return errStopPolling
-		}
-		if terminalFailure(got.Status) {
-			return fmt.Errorf("vpc %s entered terminal status %q during delete", id, got.Status)
-		}
-		return nil
-	}); err != nil {
-		resp.Diagnostics.AddError("Waiting for VPC deletion failed", err.Error())
-	}
+	deleteAndWait(ctx, &resp.Diagnostics, id,
+		r.c.DeleteVPC,
+		func(ctx context.Context) (*client.VPC, error) { return r.c.GetVPC(ctx, id) },
+		func(v *client.VPC) string { return v.Status },
+		"VPC",
+	)
 }
 
-func (r *vpcResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *vpcResource) ImportState(
+	ctx context.Context,
+	req resource.ImportStateRequest,
+	resp *resource.ImportStateResponse,
+) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 

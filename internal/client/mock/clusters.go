@@ -17,7 +17,7 @@ func (s *Server) wireClusters() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/clusters", func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("/v1/clusters", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		out := []map[string]any{}
@@ -41,7 +41,7 @@ func (s *Server) wireDCs() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/datacenters", func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("/v1/datacenters", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		out := []map[string]any{}
@@ -64,6 +64,9 @@ func (s *Server) SeedCluster(id, name, dcID string) {
 	s.clusterMap[id] = map[string]any{"id": id, "name": name, "dc_id": dcID}
 }
 
+// mockDatacenterTier is the fixed tier value seeded for mock datacenter rows.
+const mockDatacenterTier = 3
+
 // SeedDatacenter registers a datacenter row.
 func (s *Server) SeedDatacenter(id, country, city, slug string) {
 	s.mu.Lock()
@@ -73,6 +76,6 @@ func (s *Server) SeedDatacenter(id, country, city, slug string) {
 	}
 	s.dcMap[id] = map[string]any{
 		"id": id, "countryCode": country, "cityCode": city,
-		"index": 0, "tier": 3, "certifications": []string{}, "slug": slug,
+		"index": 0, "tier": mockDatacenterTier, "certifications": []string{}, "slug": slug,
 	}
 }

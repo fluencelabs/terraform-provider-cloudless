@@ -60,7 +60,11 @@ func (d *vmConfigsDS) Schema(_ context.Context, _ datasource.SchemaRequest, resp
 	}
 }
 
-func (d *vmConfigsDS) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+func (d *vmConfigsDS) Configure(
+	_ context.Context,
+	req datasource.ConfigureRequest,
+	resp *datasource.ConfigureResponse,
+) {
 	d.c = clientFromProviderData(req.ProviderData, &resp.Diagnostics)
 }
 

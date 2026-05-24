@@ -20,71 +20,89 @@ func (s *Server) wireSubnets() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/vpc/", func(w http.ResponseWriter, r *http.Request) {
-		// Path: /v1/vpc/{vpc_id}/subnets — create.
-		if r.Method != http.MethodPost {
-			s.notFound(w, r)
-			return
+	s.mux.HandleFunc("/v1/vpc/", s.handleSubnetCreate)
+	s.mux.HandleFunc("/v1/subnets", s.handleSubnetCollection)
+	s.mux.HandleFunc("/v1/subnets/delete", s.handleSubnetBulkDelete)
+}
+
+// handleSubnetCreate serves POST /v1/vpc/{vpc_id}/subnets.
+func (s *Server) handleSubnetCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.notFound(w, r)
+		return
+	}
+	parts := splitPath(r.URL.Path)
+	if len(parts) != 4 || parts[0] != "v1" || parts[1] != "vpc" || parts[3] != "subnets" {
+		s.notFound(w, r)
+		return
+	}
+	vpcID := parts[2]
+	var body struct {
+		ClusterID string  `json:"clusterId"`
+		Name      string  `json:"name"`
+		IPv4Cidr  *string `json:"ipv4Cidr,omitempty"`
+		IPv6Cidr  *string `json:"ipv6Cidr,omitempty"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := newID()
+	rec := &subnetRecord{
+		ID:        id,
+		Name:      body.Name,
+		VPCID:     vpcID,
+		ClusterID: body.ClusterID,
+		UserID:    "test-user",
+		Status:    "ready",
+	}
+	if body.IPv4Cidr != nil {
+		rec.IPv4 = *body.IPv4Cidr
+	}
+	if body.IPv6Cidr != nil {
+		rec.IPv6 = *body.IPv6Cidr
+	}
+	s.subnetMap[id] = rec
+	s.writeJSON(w, http.StatusOK, subnetWire(rec))
+}
+
+func (s *Server) handleSubnetCollection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.notFound(w, r)
+		return
+	}
+	want := r.URL.Query().Get("ids")
+	items := []map[string]any{}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, sn := range s.subnetMap {
+		if want != "" && id != want {
+			continue
 		}
-		parts := splitPath(r.URL.Path)
-		if len(parts) != 4 || parts[0] != "v1" || parts[1] != "vpc" || parts[3] != "subnets" {
-			s.notFound(w, r)
-			return
-		}
-		vpcID := parts[2]
-		var body struct {
-			ClusterID string  `json:"clusterId"`
-			Name      string  `json:"name"`
-			IPv4Cidr  *string `json:"ipv4Cidr,omitempty"`
-			IPv6Cidr  *string `json:"ipv6Cidr,omitempty"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		id := newID()
-		rec := &subnetRecord{ID: id, Name: body.Name, VPCID: vpcID, ClusterID: body.ClusterID, UserID: "test-user", Status: "ready"}
-		if body.IPv4Cidr != nil {
-			rec.IPv4 = *body.IPv4Cidr
-		}
-		if body.IPv6Cidr != nil {
-			rec.IPv6 = *body.IPv6Cidr
-		}
-		s.subnetMap[id] = rec
-		s.writeJSON(w, http.StatusOK, subnetWire(rec))
+		items = append(items, subnetWire(sn))
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"pagination": map[string]int{
+			"totalRecords":    len(items),
+			"filteredRecords": len(items),
+			"totalPages":      1,
+			"currentPage":     0,
+			"perPage":         defaultPerPage,
+		},
 	})
-	s.mux.HandleFunc("/v1/subnets", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			want := r.URL.Query().Get("ids")
-			items := []map[string]any{}
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			for id, sn := range s.subnetMap {
-				if want != "" && id != want {
-					continue
-				}
-				items = append(items, subnetWire(sn))
-			}
-			s.writeJSON(w, http.StatusOK, map[string]any{
-				"items":      items,
-				"pagination": map[string]int{"totalRecords": len(items), "filteredRecords": len(items), "totalPages": 1, "currentPage": 0, "perPage": 100},
-			})
-		default:
-			s.notFound(w, r)
-		}
-	})
-	s.mux.HandleFunc("/v1/subnets/delete", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			IDs []string `json:"ids"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		s.mu.Lock()
-		for _, id := range body.IDs {
-			delete(s.subnetMap, id)
-		}
-		s.mu.Unlock()
-		w.WriteHeader(http.StatusOK)
-	})
+}
+
+func (s *Server) handleSubnetBulkDelete(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	s.mu.Lock()
+	for _, id := range body.IDs {
+		delete(s.subnetMap, id)
+	}
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusOK)
 }
 
 func subnetWire(rec *subnetRecord) map[string]any {

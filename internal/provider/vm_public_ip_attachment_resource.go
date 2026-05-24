@@ -26,26 +26,53 @@ type vmPublicIPAttachmentModel struct {
 	PublicIPID types.String `tfsdk:"public_ip_id"`
 }
 
-func (r *vmPublicIPAttachmentResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+func (r *vmPublicIPAttachmentResource) Metadata(
+	_ context.Context,
+	req resource.MetadataRequest,
+	resp *resource.MetadataResponse,
+) {
 	resp.TypeName = req.ProviderTypeName + "_vm_public_ip_attachment"
 }
 
-func (r *vmPublicIPAttachmentResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *vmPublicIPAttachmentResource) Schema(
+	_ context.Context,
+	_ resource.SchemaRequest,
+	resp *resource.SchemaResponse,
+) {
 	resp.Schema = schema.Schema{
 		Description: "Attach a cloudless_public_ip to a cloudless_vm. Both attributes are ForceNew.",
 		Attributes: map[string]schema.Attribute{
-			"id":           schema.StringAttribute{Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
-			"vm_id":        schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}, Validators: []validator.String{validators.UUID()}},
-			"public_ip_id": schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}, Validators: []validator.String{validators.UUID()}},
+			"id": schema.StringAttribute{
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"vm_id": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+				Validators:    []validator.String{validators.UUID()},
+			},
+			"public_ip_id": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+				Validators:    []validator.String{validators.UUID()},
+			},
 		},
 	}
 }
 
-func (r *vmPublicIPAttachmentResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *vmPublicIPAttachmentResource) Configure(
+	_ context.Context,
+	req resource.ConfigureRequest,
+	resp *resource.ConfigureResponse,
+) {
 	r.c = clientFromProviderData(req.ProviderData, &resp.Diagnostics)
 }
 
-func (r *vmPublicIPAttachmentResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+func (r *vmPublicIPAttachmentResource) Create(
+	ctx context.Context,
+	req resource.CreateRequest,
+	resp *resource.CreateResponse,
+) {
 	var plan vmPublicIPAttachmentModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -59,7 +86,11 @@ func (r *vmPublicIPAttachmentResource) Create(ctx context.Context, req resource.
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *vmPublicIPAttachmentResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+func (r *vmPublicIPAttachmentResource) Read(
+	ctx context.Context,
+	req resource.ReadRequest,
+	resp *resource.ReadResponse,
+) {
 	var state vmPublicIPAttachmentModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -81,7 +112,11 @@ func (r *vmPublicIPAttachmentResource) Read(ctx context.Context, req resource.Re
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *vmPublicIPAttachmentResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+func (r *vmPublicIPAttachmentResource) Update(
+	ctx context.Context,
+	req resource.UpdateRequest,
+	resp *resource.UpdateResponse,
+) {
 	// Both attributes are RequiresReplace, so Update should never be called.
 	// If it is (e.g., a future schema field is added), preserve state.
 	var plan vmPublicIPAttachmentModel
@@ -89,7 +124,11 @@ func (r *vmPublicIPAttachmentResource) Update(ctx context.Context, req resource.
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *vmPublicIPAttachmentResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+func (r *vmPublicIPAttachmentResource) Delete(
+	ctx context.Context,
+	req resource.DeleteRequest,
+	resp *resource.DeleteResponse,
+) {
 	var state vmPublicIPAttachmentModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -110,14 +149,18 @@ func (r *vmPublicIPAttachmentResource) Delete(ctx context.Context, req resource.
 		// Already detached or replaced — nothing to do.
 		return
 	}
-	if err := r.c.RemoveVMPublicIP(ctx, state.VMID.ValueString()); err != nil && !client.IsNotFound(err) {
+	if err = r.c.RemoveVMPublicIP(ctx, state.VMID.ValueString()); err != nil && !client.IsNotFound(err) {
 		resp.Diagnostics.AddError("Detach public IP failed", err.Error())
 	}
 }
 
-func (r *vmPublicIPAttachmentResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	parts := strings.SplitN(req.ID, ":", 2)
-	if len(parts) != 2 {
+func (r *vmPublicIPAttachmentResource) ImportState(
+	ctx context.Context,
+	req resource.ImportStateRequest,
+	resp *resource.ImportStateResponse,
+) {
+	parts := strings.SplitN(req.ID, ":", importIDParts)
+	if len(parts) != importIDParts {
 		resp.Diagnostics.AddError("Invalid import ID", "expected <vm_id>:<public_ip_id>")
 		return
 	}

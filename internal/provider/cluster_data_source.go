@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -36,12 +37,25 @@ func (d *clusterDS) Schema(_ context.Context, _ datasource.SchemaRequest, resp *
 	resp.Schema = schema.Schema{
 		Description: "Look up exactly one cluster by filter criteria. Errors if more than one matches.",
 		Attributes: map[string]schema.Attribute{
-			"id":        schema.StringAttribute{Optional: true, Computed: true, Description: "Explicit cluster UUID.", Validators: []validator.String{validators.UUID()}},
-			"name":      schema.StringAttribute{Optional: true, Computed: true},
-			"region":    schema.StringAttribute{Optional: true, Computed: true, Description: "ISO 3166-1 alpha-2 country code (e.g. DE, PL).", Validators: []validator.String{validators.RegionCode()}},
+			"id": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Explicit cluster UUID.",
+				Validators:  []validator.String{validators.UUID()},
+			},
+			"name": schema.StringAttribute{Optional: true, Computed: true},
+			"region": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "ISO 3166-1 alpha-2 country code (e.g. DE, PL).",
+				Validators:  []validator.String{validators.RegionCode()},
+			},
 			"city_code": schema.StringAttribute{Optional: true, Computed: true},
 
-			"dc_id":             schema.StringAttribute{Computed: true, Validators: []validator.String{validators.UUID()}},
+			"dc_id": schema.StringAttribute{
+				Computed:   true,
+				Validators: []validator.String{validators.UUID()},
+			},
 			"dc_slug":           schema.StringAttribute{Computed: true},
 			"dc_tier":           schema.Int64Attribute{Computed: true},
 			"dc_certifications": schema.ListAttribute{ElementType: types.StringType, Computed: true},
@@ -119,11 +133,13 @@ func (d *clusterDS) Read(ctx context.Context, req datasource.ReadRequest, resp *
 // joinComma is a tiny helper to avoid importing strings just for this.
 func joinComma(xs []string) string {
 	out := ""
+	var outSb122 strings.Builder
 	for i, x := range xs {
 		if i > 0 {
-			out += ", "
+			outSb122.WriteString(", ")
 		}
-		out += x
+		outSb122.WriteString(x)
 	}
+	out += outSb122.String()
 	return out
 }

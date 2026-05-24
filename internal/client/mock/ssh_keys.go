@@ -61,8 +61,14 @@ func (s *Server) wireSSHKeys() {
 				items = append(items, sshKeyWire(k))
 			}
 			s.writeJSON(w, http.StatusOK, map[string]any{
-				"items":      items,
-				"pagination": map[string]int{"totalRecords": len(items), "filteredRecords": len(items), "totalPages": 1, "currentPage": 0, "perPage": 100},
+				"items": items,
+				"pagination": map[string]int{
+					"totalRecords":    len(items),
+					"filteredRecords": len(items),
+					"totalPages":      1,
+					"currentPage":     0,
+					"perPage":         defaultPerPage,
+				},
 			})
 		default:
 			s.notFound(w, r)

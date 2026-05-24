@@ -28,9 +28,17 @@ resource "cloudless_ssh_key" "me" {
 }
 `,
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue("cloudless_ssh_key.me", tfjsonpath.New("name"), knownvalue.StringExact("demo")),
+					statecheck.ExpectKnownValue(
+						"cloudless_ssh_key.me",
+						tfjsonpath.New("name"),
+						knownvalue.StringExact("demo"),
+					),
 					statecheck.ExpectKnownValue("cloudless_ssh_key.me", tfjsonpath.New("id"), knownvalue.NotNull()),
-					statecheck.ExpectKnownValue("cloudless_ssh_key.me", tfjsonpath.New("fingerprint"), knownvalue.NotNull()),
+					statecheck.ExpectKnownValue(
+						"cloudless_ssh_key.me",
+						tfjsonpath.New("fingerprint"),
+						knownvalue.NotNull(),
+					),
 				},
 			},
 		},
@@ -58,7 +66,10 @@ resource "cloudless_ssh_key" "me" {
 				Config: cfg("second"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("cloudless_ssh_key.me", plancheck.ResourceActionDestroyBeforeCreate),
+						plancheck.ExpectResourceAction(
+							"cloudless_ssh_key.me",
+							plancheck.ResourceActionDestroyBeforeCreate,
+						),
 					},
 				},
 			},

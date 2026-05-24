@@ -13,12 +13,23 @@ import (
 	"sync"
 )
 
+const (
+	// resourcePathParts is the segment count of a "/v{n}/{resource}/{id}" path
+	// once split (e.g. ["v1", "public_ips", "<id>"]).
+	resourcePathParts = 3
+	// defaultPerPage is the page size echoed in mock list responses.
+	defaultPerPage = 100
+	// idByteLen is the number of random bytes backing a generated mock ID.
+	idByteLen = 16
+)
+
 // Server wraps an httptest.Server and holds the in-memory state of the
 // resources it knows how to serve. Concrete endpoints are registered by the
 // per-resource files in this package; the mux is kept reachable so each
 // resource's wireXOnce helper can register handlers idempotently.
 type Server struct {
 	*httptest.Server
+
 	mu  sync.Mutex
 	mux *http.ServeMux
 
@@ -38,10 +49,13 @@ type Server struct {
 	storageWiring     sync.Once
 	publicIPMap       map[string]*publicIPRecord
 	publicIPWiring    sync.Once
-	vmMap             map[string]*vmRecord
-	vmWiring          sync.Once
-	sshKeyMap         map[string]*sshKeyRecord
-	sshKeyWiring      sync.Once
+	// publicIPSeq assigns sequential octets to synthesized public IP
+	// addresses. Guarded by s.mu.
+	publicIPSeq  uint32
+	vmMap        map[string]*vmRecord
+	vmWiring     sync.Once
+	sshKeyMap    map[string]*sshKeyRecord
+	sshKeyWiring sync.Once
 
 	// FailRemoveVMStorages, when set, makes /v2/vms/{id}/storages/remove return 500.
 	FailRemoveVMStorages bool
@@ -84,9 +98,9 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// writeError writes a Fluence ErrorBody-shaped JSON response.
-func (s *Server) writeError(w http.ResponseWriter, status int, msg string) {
-	s.writeJSON(w, status, map[string]string{"error": msg})
+// writeError writes a Fluence ErrorBody-shaped 404 JSON response.
+func (s *Server) writeError(w http.ResponseWriter, msg string) {
+	s.writeJSON(w, http.StatusNotFound, map[string]string{"error": msg})
 }
 
 // splitPath splits "/a/b/c" → ["a","b","c"].
@@ -102,7 +116,17 @@ func splitPath(p string) []string {
 }
 
 func newID() string {
-	b := make([]byte, 16)
+	b := make([]byte, idByteLen)
 	_, _ = rand.Read(b)
-	return hex.EncodeToString(b[:4]) + "-" + hex.EncodeToString(b[4:6]) + "-" + hex.EncodeToString(b[6:8]) + "-" + hex.EncodeToString(b[8:10]) + "-" + hex.EncodeToString(b[10:16])
+	return hex.EncodeToString(
+		b[:4],
+	) + "-" + hex.EncodeToString(
+		b[4:6],
+	) + "-" + hex.EncodeToString(
+		b[6:8],
+	) + "-" + hex.EncodeToString(
+		b[8:10],
+	) + "-" + hex.EncodeToString(
+		b[10:16],
+	)
 }

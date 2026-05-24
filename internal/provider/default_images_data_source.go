@@ -32,7 +32,11 @@ type defaultImagesModel struct {
 	Images []defaultImageModel `tfsdk:"images"`
 }
 
-func (d *defaultImagesDS) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+func (d *defaultImagesDS) Metadata(
+	_ context.Context,
+	req datasource.MetadataRequest,
+	resp *datasource.MetadataResponse,
+) {
 	resp.TypeName = req.ProviderTypeName + "_default_images"
 }
 
@@ -60,7 +64,11 @@ func (d *defaultImagesDS) Schema(_ context.Context, _ datasource.SchemaRequest, 
 	}
 }
 
-func (d *defaultImagesDS) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+func (d *defaultImagesDS) Configure(
+	_ context.Context,
+	req datasource.ConfigureRequest,
+	resp *datasource.ConfigureResponse,
+) {
 	d.c = clientFromProviderData(req.ProviderData, &resp.Diagnostics)
 }
 

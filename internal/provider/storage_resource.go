@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -46,9 +45,16 @@ func (r *storageResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 	resp.Schema = schema.Schema{
 		Description: "A storage volume on a Fluence cluster.",
 		Attributes: map[string]schema.Attribute{
-			"id":         schema.StringAttribute{Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
-			"cluster_id": schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}, Validators: []validator.String{validators.UUID()}},
-			"name":       schema.StringAttribute{Required: true},
+			"id": schema.StringAttribute{
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"cluster_id": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+				Validators:    []validator.String{validators.UUID()},
+			},
+			"name": schema.StringAttribute{Required: true},
 			"storage_type": schema.StringAttribute{
 				Required:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
@@ -76,7 +82,11 @@ func (r *storageResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 	}
 }
 
-func (r *storageResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *storageResource) Configure(
+	_ context.Context,
+	req resource.ConfigureRequest,
+	resp *resource.ConfigureResponse,
+) {
 	r.c = clientFromProviderData(req.ProviderData, &resp.Diagnostics)
 }
 
@@ -101,20 +111,12 @@ func (r *storageResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	id := out.ID
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetStorage(ctx, id)
-		if err != nil {
-			return err
-		}
-		out = got
-		if isReady(got.Status) {
-			return errStopPolling
-		}
-		if terminalFailure(got.Status) {
-			return fmt.Errorf("storage %s entered terminal status %q", id, got.Status)
-		}
-		return nil
-	}); err != nil {
+	out, err = pollUntilReady(ctx,
+		func(ctx context.Context) (*client.Storage, error) { return r.c.GetStorage(ctx, id) },
+		func(v *client.Storage) string { return v.Status },
+		"storage "+id,
+	)
+	if err != nil {
 		resp.Diagnostics.AddError("Waiting for storage failed", err.Error())
 		return
 	}
@@ -192,31 +194,19 @@ func (r *storageResource) Delete(ctx context.Context, req resource.DeleteRequest
 		return
 	}
 	id := state.ID.ValueString()
-	if err := r.c.DeleteStorage(ctx, id); err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("Delete storage failed", err.Error())
-		return
-	}
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetStorage(ctx, id)
-		if err != nil {
-			if client.IsNotFound(err) {
-				return errStopPolling
-			}
-			return err
-		}
-		if isRemoved(got.Status) {
-			return errStopPolling
-		}
-		if terminalFailure(got.Status) {
-			return fmt.Errorf("storage %s entered terminal status %q during delete", id, got.Status)
-		}
-		return nil
-	}); err != nil {
-		resp.Diagnostics.AddError("Waiting for storage deletion failed", err.Error())
-	}
+	deleteAndWait(ctx, &resp.Diagnostics, id,
+		r.c.DeleteStorage,
+		func(ctx context.Context) (*client.Storage, error) { return r.c.GetStorage(ctx, id) },
+		func(v *client.Storage) string { return v.Status },
+		"storage",
+	)
 }
 
-func (r *storageResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *storageResource) ImportState(
+	ctx context.Context,
+	req resource.ImportStateRequest,
+	resp *resource.ImportStateResponse,
+) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 

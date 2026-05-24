@@ -15,7 +15,11 @@ import (
 // getByID should return *APIError 404 when the resource is gone; any other
 // error is treated as a transient failure and surfaced. The first arg is the
 // resource type as it appears in HCL (e.g. "cloudless_ssh_key").
-func CheckDestroy(c *client.Client, tfType string, getByID func(ctx context.Context, id string) error) func(*terraform.State) error {
+func CheckDestroy(
+	_ *client.Client,
+	tfType string,
+	getByID func(ctx context.Context, id string) error,
+) func(*terraform.State) error {
 	return func(s *terraform.State) error {
 		for _, rs := range s.RootModule().Resources {
 			if rs.Type != tfType {
