@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // sshKeyRecord is the mock's in-memory shape for an SSH key.
@@ -27,71 +28,102 @@ func (s *Server) wireSSHKeys() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/ssh_keys", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPost:
-			var body struct {
-				Name      string `json:"name"`
-				PublicKey string `json:"publicKey"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			id := newID()
-			sum := sha256.Sum256([]byte(body.PublicKey))
-			rec := &sshKeyRecord{
-				ID:          id,
-				UserID:      "test-user",
-				Name:        body.Name,
-				PublicKey:   body.PublicKey,
-				Algorithm:   "ssh-ed25519",
-				Fingerprint: "SHA256:" + hex.EncodeToString(sum[:8]),
-			}
-			s.sshKeyMap[id] = rec
-			s.writeJSON(w, http.StatusOK, sshKeyWire(rec))
-		case http.MethodGet:
-			want := r.URL.Query().Get("ids")
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			items := []map[string]any{}
-			for id, k := range s.sshKeyMap {
-				if want != "" && id != want {
-					continue
-				}
-				items = append(items, sshKeyWire(k))
-			}
-			s.writeJSON(w, http.StatusOK, map[string]any{
-				"items": items,
-				"pagination": map[string]int{
-					"totalRecords":    len(items),
-					"filteredRecords": len(items),
-					"totalPages":      1,
-					"currentPage":     0,
-					"perPage":         defaultPerPage,
-				},
-			})
-		default:
-			s.notFound(w, r)
-		}
-	})
+	s.mux.HandleFunc("/v1/ssh_keys", s.handleSSHKeysCollection)
 	// /v1/ssh_keys/delete is an exact path; ServeMux prefers exact matches over
 	// any prefix, so register it explicitly.
-	s.mux.HandleFunc("/v1/ssh_keys/delete", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			s.notFound(w, r)
+	s.mux.HandleFunc("/v1/ssh_keys/delete", s.handleSSHKeysBulkDelete)
+}
+
+func (s *Server) handleSSHKeysCollection(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		s.createSSHKey(w, r)
+	case http.MethodGet:
+		s.listSSHKeys(w, r)
+	default:
+		s.notFound(w, r)
+	}
+}
+
+func (s *Server) createSSHKey(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name      string `json:"name"`
+		PublicKey string `json:"publicKey"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Fluence dedups by key body (ignoring the comment): a second registration
+	// of the same material returns 409.
+	for _, k := range s.sshKeyMap {
+		if sameSSHKeyBody(k.PublicKey, body.PublicKey) {
+			s.writeJSON(w, http.StatusConflict, map[string]string{"error": "SshKey already exists"})
 			return
 		}
-		var body struct {
-			IDs []string `json:"ids"`
+	}
+	id := newID()
+	sum := sha256.Sum256([]byte(body.PublicKey))
+	rec := &sshKeyRecord{
+		ID:          id,
+		UserID:      "test-user",
+		Name:        body.Name,
+		PublicKey:   body.PublicKey,
+		Algorithm:   "ssh-ed25519",
+		Fingerprint: "SHA256:" + hex.EncodeToString(sum[:8]),
+	}
+	s.sshKeyMap[id] = rec
+	s.writeJSON(w, http.StatusOK, sshKeyWire(rec))
+}
+
+func (s *Server) listSSHKeys(w http.ResponseWriter, r *http.Request) {
+	want := r.URL.Query().Get("ids")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := []map[string]any{}
+	for id, k := range s.sshKeyMap {
+		if want != "" && id != want {
+			continue
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		s.mu.Lock()
-		for _, id := range body.IDs {
-			delete(s.sshKeyMap, id)
-		}
-		s.mu.Unlock()
-		w.WriteHeader(http.StatusOK)
+		items = append(items, sshKeyWire(k))
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"pagination": map[string]int{
+			"totalRecords":    len(items),
+			"filteredRecords": len(items),
+			"totalPages":      1,
+			"currentPage":     0,
+			"perPage":         defaultPerPage,
+		},
 	})
+}
+
+func (s *Server) handleSSHKeysBulkDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.notFound(w, r)
+		return
+	}
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	s.mu.Lock()
+	for _, id := range body.IDs {
+		delete(s.sshKeyMap, id)
+	}
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusOK)
+}
+
+// sameSSHKeyBody compares two OpenSSH public keys by algorithm + base64 body,
+// ignoring any trailing comment — mirroring how the real API dedups keys.
+func sameSSHKeyBody(a, b string) bool {
+	fa := strings.Fields(a)
+	fb := strings.Fields(b)
+	if len(fa) < 2 || len(fb) < 2 {
+		return false
+	}
+	return fa[0] == fb[0] && fa[1] == fb[1]
 }
 
 func sshKeyWire(rec *sshKeyRecord) map[string]any {

@@ -81,6 +81,16 @@ func IsNotFound(err error) bool {
 	return false
 }
 
+// IsConflict reports whether err is a 409 from the API (e.g. a resource that
+// already exists).
+func IsConflict(err error) bool {
+	var ae *APIError
+	if errors.As(err, &ae) {
+		return ae.StatusCode == http.StatusConflict
+	}
+	return false
+}
+
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body, out any) error {
 	u := c.endpoint + path
 	if len(query) > 0 {
@@ -202,6 +212,16 @@ func (c *Client) GetSSHKey(ctx context.Context, id string) (*SSHKey, error) {
 		}
 	}
 	return nil, &APIError{StatusCode: http.StatusNotFound, Message: "ssh key not found"}
+}
+
+// ListSSHKeys returns all SSH keys registered for the authenticated user. Used
+// to recover from a create conflict by matching an existing key by body.
+func (c *Client) ListSSHKeys(ctx context.Context) ([]SSHKey, error) {
+	var resp sshKeysListResponse
+	if err := c.do(ctx, http.MethodGet, "/v1/ssh_keys", nil, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Items, nil
 }
 
 func (c *Client) DeleteSSHKey(ctx context.Context, id string) error {
@@ -829,11 +849,31 @@ func (r *SGRemote) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// CreateSecurityGroupRequest mirrors vodopad's CreateUserSecurityGroupRequest.
+// Note the create endpoint models each direction as Option<Vec<…>> — an array
+// or an absent field — NOT the {type, rules} object used by reads and updates.
 type CreateSecurityGroupRequest struct {
-	ClusterID    string             `json:"clusterId"`
-	Name         string             `json:"name"`
-	IngressRules SecurityGroupRules `json:"ingressRules"`
-	EgressRules  SecurityGroupRules `json:"egressRules"`
+	ClusterID    string               `json:"clusterId"`
+	Name         string               `json:"name"`
+	IngressRules *[]SecurityGroupRule `json:"ingressRules,omitempty"`
+	EgressRules  *[]SecurityGroupRule `json:"egressRules,omitempty"`
+}
+
+// RulesToCreateField maps the internal SecurityGroupRules (the object form
+// shared with reads and updates) onto the create endpoint's per-direction wire
+// shape Option<Vec<SecurityGroupRuleDto>>:
+//   - AllowAll        -> nil       (field omitted; the API reads None = allow all)
+//   - Allow, no rules -> &[]       (empty array = deny all)
+//   - Allow, rules    -> &[rule…]  (allow-listed)
+func RulesToCreateField(r SecurityGroupRules) *[]SecurityGroupRule {
+	if r.Mode == "allowAll" {
+		return nil
+	}
+	rules := r.Rules
+	if rules == nil {
+		rules = []SecurityGroupRule{}
+	}
+	return &rules
 }
 
 type UpdateSecurityGroupRequest struct {
