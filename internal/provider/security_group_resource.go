@@ -151,8 +151,8 @@ func (r *sgResource) Create(ctx context.Context, req resource.CreateRequest, res
 	out, err := r.c.CreateSecurityGroup(ctx, client.CreateSecurityGroupRequest{
 		ClusterID:    plan.ClusterID.ValueString(),
 		Name:         plan.Name.ValueString(),
-		IngressRules: ingress,
-		EgressRules:  egress,
+		IngressRules: client.RulesToCreateField(ingress),
+		EgressRules:  client.RulesToCreateField(egress),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Create security group failed", err.Error())

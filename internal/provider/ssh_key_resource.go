@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -14,6 +15,20 @@ import (
 )
 
 func NewSSHKeyResource() resource.Resource { return &sshKeyResource{} }
+
+// samePublicKeyBody reports whether two OpenSSH public keys share the same key
+// material, ignoring any trailing comment and surrounding whitespace. Fluence
+// dedups keys by body (algorithm + base64), so this is how we recognise a key
+// that already exists under a different name/comment.
+func samePublicKeyBody(a, b string) bool {
+	fa := strings.Fields(a)
+	fb := strings.Fields(b)
+	// Need at least "<algorithm> <base64>" on both sides.
+	if len(fa) < 2 || len(fb) < 2 {
+		return false
+	}
+	return fa[0] == fb[0] && fa[1] == fb[1]
+}
 
 type sshKeyResource struct {
 	c *client.Client
@@ -79,8 +94,26 @@ func (r *sshKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		PublicKey: plan.PublicKey.ValueString(),
 	})
 	if err != nil {
-		resp.Diagnostics.AddError("Create SSH key failed", err.Error())
-		return
+		// Fluence dedups keys by body: if this material is already registered
+		// (possibly under a different name/comment), adopt the existing key
+		// instead of failing. We keep the config's name and public_key in state
+		// and only take the server-assigned identity/computed fields.
+		if !client.IsConflict(err) {
+			resp.Diagnostics.AddError("Create SSH key failed", err.Error())
+			return
+		}
+		existing, found, lookupErr := r.findKeyByBody(ctx, plan.PublicKey.ValueString())
+		if lookupErr != nil {
+			resp.Diagnostics.AddError("Create SSH key failed",
+				err.Error()+"; could not look up the existing key to adopt: "+lookupErr.Error())
+			return
+		}
+		if !found {
+			// 409 but no matching key found — surface the original error.
+			resp.Diagnostics.AddError("Create SSH key failed", err.Error())
+			return
+		}
+		out = existing
 	}
 
 	plan.ID = types.StringValue(out.ID)
@@ -88,6 +121,24 @@ func (r *sshKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	plan.Algorithm = types.StringValue(out.Algorithm)
 	plan.Fingerprint = types.StringValue(out.Fingerprint)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// findKeyByBody returns the registered SSH key whose material matches publicKey
+// (comment-insensitive). The bool reports whether a match was found.
+func (r *sshKeyResource) findKeyByBody(
+	ctx context.Context,
+	publicKey string,
+) (*client.SSHKey, bool, error) {
+	keys, err := r.c.ListSSHKeys(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	for i := range keys {
+		if samePublicKeyBody(keys[i].PublicKey, publicKey) {
+			return &keys[i], true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 func (r *sshKeyResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -107,8 +158,18 @@ func (r *sshKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	state.Name = types.StringValue(out.Name)
-	state.PublicKey = types.StringValue(out.PublicKey)
+	// Name and public_key are write-once from the config's perspective (both
+	// carry RequiresReplace, and the API has no rename endpoint). Reconcile them
+	// from the API only when state has no value yet — i.e. on import. Otherwise
+	// preserve the configured values: an adopted key may have a different name
+	// or a comment-less body, and overwriting would cause a perpetual
+	// replace-loop.
+	if state.Name.IsNull() || state.Name.ValueString() == "" {
+		state.Name = types.StringValue(out.Name)
+	}
+	if !samePublicKeyBody(out.PublicKey, state.PublicKey.ValueString()) {
+		state.PublicKey = types.StringValue(out.PublicKey)
+	}
 	state.UserID = types.StringValue(out.UserID)
 	state.Algorithm = types.StringValue(out.Algorithm)
 	state.Fingerprint = types.StringValue(out.Fingerprint)

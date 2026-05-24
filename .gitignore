@@ -16,3 +16,6 @@ override.tf.json
 *_override.tf.json
 .terraformrc
 terraform.rc
+
+# Local dev builds (terraform dev_overrides)
+.local-bin/

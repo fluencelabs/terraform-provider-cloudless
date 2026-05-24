@@ -55,10 +55,36 @@ func (s *Server) createSG(w http.ResponseWriter, r *http.Request) {
 	rec := &sgRecord{
 		ID: id, ClusterID: body.ClusterID, Name: body.Name,
 		UserID: "test-user", Status: "ready",
-		Ingress: body.IngressRules, Egress: body.EgressRules,
+		// The real create endpoint takes each direction as an array (or an
+		// absent field), but reads it back as the {type, rules} object. Store
+		// the canonical object form so reads stay faithful to the live API.
+		Ingress: createRulesToStored(body.IngressRules),
+		Egress:  createRulesToStored(body.EgressRules),
 	}
 	s.sgMap[id] = rec
 	s.writeJSON(w, http.StatusOK, sgWire(rec))
+}
+
+// createRulesToStored converts the create endpoint's per-direction wire form
+// (Option<Vec<Rule>>) into the stored/response object form:
+//   - absent       -> nil          (sgWire emits {"type":"allowAll"})
+//   - [] or [rule…] -> {"type":"allow","rules":[…]}
+//
+// A non-array body (e.g. the old {type, rules} object) is rejected by panicking
+// in tests, mirroring the real API's "invalid type: map, expected a sequence".
+func createRulesToStored(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var rules []json.RawMessage
+	if err := json.Unmarshal(raw, &rules); err != nil {
+		panic("mock security_group create: ingress/egress rules must be a JSON array, got: " + string(raw))
+	}
+	if rules == nil {
+		rules = []json.RawMessage{}
+	}
+	out, _ := json.Marshal(map[string]any{"type": "allow", "rules": rules})
+	return out
 }
 
 func (s *Server) listSGs(w http.ResponseWriter, r *http.Request) {
