@@ -111,6 +111,10 @@ func toStringList(in []string) []types.String {
 	return out
 }
 
+// importIDParts is the number of colon-separated fields in a composite
+// "<a>:<b>" resource import ID.
+const importIDParts = 2
+
 // pollOptions controls a wait loop. All resources use the same cadence today;
 // expose this so individual resources can extend it later.
 type pollOptions struct {
@@ -118,13 +122,124 @@ type pollOptions struct {
 	Interval time.Duration
 }
 
+const (
+	// defaultPollTimeout bounds how long we wait for a resource to reach a
+	// terminal state.
+	defaultPollTimeout = 30 * time.Minute
+	// defaultPollInterval is the gap between successive status polls.
+	defaultPollInterval = 5 * time.Second
+)
+
 func defaultPoll() pollOptions {
-	return pollOptions{Timeout: 30 * time.Minute, Interval: 5 * time.Second}
+	return pollOptions{Timeout: defaultPollTimeout, Interval: defaultPollInterval}
 }
 
 // errStopPolling is returned by a poll func when the resource has reached a
 // terminal state and the loop should exit successfully.
 var errStopPolling = errors.New("stop polling")
+
+// pollUntilReady polls get until the resource reports a ready status, enters a
+// terminal-failure status, or the poll budget is exhausted. It returns the most
+// recently fetched resource. label names the resource in error messages.
+func pollUntilReady[T any](
+	ctx context.Context,
+	get func(context.Context) (T, error),
+	status func(T) string,
+	label string,
+) (T, error) {
+	var last T
+	err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
+		got, err := get(ctx)
+		if err != nil {
+			return err
+		}
+		last = got
+		s := status(got)
+		if isReady(s) {
+			return errStopPolling
+		}
+		if terminalFailure(s) {
+			return fmt.Errorf("%s entered terminal status %q", label, s)
+		}
+		return nil
+	})
+	return last, err
+}
+
+// diffStrings compares two string slices as sets and returns the elements only
+// in next (added) and only in prev (removed).
+func diffStrings(prev, next []string) ([]string, []string) {
+	prevSet := make(map[string]bool, len(prev))
+	for _, s := range prev {
+		prevSet[s] = true
+	}
+	nextSet := make(map[string]bool, len(next))
+	for _, s := range next {
+		nextSet[s] = true
+	}
+	var added, removed []string
+	for _, s := range next {
+		if !prevSet[s] {
+			added = append(added, s)
+		}
+	}
+	for _, s := range prev {
+		if !nextSet[s] {
+			removed = append(removed, s)
+		}
+	}
+	return added, removed
+}
+
+// deleteAndWait issues del then blocks until the resource is gone, recording
+// any failure on diags. noun is the human-readable resource name used in error
+// messages (e.g. "VPC", "subnet"). A not-found result from del is treated as
+// already deleted.
+func deleteAndWait[T any](
+	ctx context.Context,
+	diags *diag.Diagnostics,
+	id string,
+	del func(context.Context, string) error,
+	get func(context.Context) (T, error),
+	status func(T) string,
+	noun string,
+) {
+	if err := del(ctx, id); err != nil && !client.IsNotFound(err) {
+		diags.AddError("Delete "+noun+" failed", err.Error())
+		return
+	}
+	if err := pollUntilGone(ctx, get, status, noun+" "+id); err != nil {
+		diags.AddError("Waiting for "+noun+" deletion failed", err.Error())
+	}
+}
+
+// pollUntilGone polls get until the resource is removed, returns a not-found
+// error, enters a terminal-failure status, or the poll budget is exhausted.
+// label names the resource in error messages.
+func pollUntilGone[T any](
+	ctx context.Context,
+	get func(context.Context) (T, error),
+	status func(T) string,
+	label string,
+) error {
+	return waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
+		got, err := get(ctx)
+		if err != nil {
+			if client.IsNotFound(err) {
+				return errStopPolling
+			}
+			return err
+		}
+		s := status(got)
+		if isRemoved(s) {
+			return errStopPolling
+		}
+		if terminalFailure(s) {
+			return fmt.Errorf("%s entered terminal status %q during delete", label, s)
+		}
+		return nil
+	})
+}
 
 // waitFor calls fn repeatedly until it returns errStopPolling, a non-nil
 // error, or the context/timeout is exhausted.
@@ -136,7 +251,7 @@ func waitFor(ctx context.Context, opts pollOptions, fn func(context.Context) err
 			"interval_ms": opts.Interval.Milliseconds(),
 			"remaining":   time.Until(deadline).Truncate(time.Second).String(),
 		})
-		if err == errStopPolling {
+		if errors.Is(err, errStopPolling) {
 			return nil
 		}
 		if err != nil {
@@ -153,34 +268,31 @@ func waitFor(ctx context.Context, opts pollOptions, fn func(context.Context) err
 	}
 }
 
+// Resource status strings reported by the Fluence API.
+const (
+	statusFailed     = "failed"
+	statusReady      = "ready"
+	statusLaunched   = "launched"
+	statusRemoved    = "removed"
+	statusTerminated = "terminated"
+)
+
 // terminalFailure returns true for status strings the API uses to signal a
 // non-recoverable end state.
 func terminalFailure(status string) bool {
-	switch status {
-	case "failed":
-		return true
-	}
-	return false
+	return status == statusFailed
 }
 
 // isReady reports whether a status string indicates the resource is fully
 // provisioned. Both "ready" (VPC/subnet/SG/storage/public-ip) and "launched"
 // (VM) are considered ready.
 func isReady(status string) bool {
-	switch status {
-	case "ready", "launched":
-		return true
-	}
-	return false
+	return status == statusReady || status == statusLaunched
 }
 
 // isRemoved reports whether the resource has finished teardown.
 func isRemoved(status string) bool {
-	switch status {
-	case "removed", "terminated":
-		return true
-	}
-	return false
+	return status == statusRemoved || status == statusTerminated
 }
 
 // resolveClusterID returns the effective cluster_id for a resource.
@@ -190,7 +302,12 @@ func isRemoved(status string) bool {
 //   - vpc_id only             → fetch parent VPC, return its cluster_id
 //   - both set                → fetch parent VPC, verify match, return; error on mismatch
 //   - neither                 → diags error
-func resolveClusterID(ctx context.Context, c *client.Client, explicit, vpcID types.String, diags *diag.Diagnostics) string {
+func resolveClusterID(
+	ctx context.Context,
+	c *client.Client,
+	explicit, vpcID types.String,
+	diags *diag.Diagnostics,
+) string {
 	hasExplicit := !explicit.IsNull() && !explicit.IsUnknown() && explicit.ValueString() != ""
 	hasVPC := !vpcID.IsNull() && !vpcID.IsUnknown() && vpcID.ValueString() != ""
 

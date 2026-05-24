@@ -84,7 +84,10 @@ func (r *sgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 	resp.Schema = schema.Schema{
 		Description: "A security group on a Fluence cluster. Per-direction mode controls how rule blocks are interpreted.",
 		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
+			"id": schema.StringAttribute{
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
 			"cluster_id": schema.StringAttribute{
 				Required:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
@@ -94,12 +97,12 @@ func (r *sgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 			"ingress_mode": schema.StringAttribute{
 				Optional: true, Computed: true,
 				Description: "\"allow_all\" (default), \"allow_listed\" (requires ingress blocks), or \"deny_all\".",
-				Validators:  []validator.String{stringvalidator.OneOf("allow_all", "allow_listed", "deny_all")},
+				Validators:  []validator.String{stringvalidator.OneOf(modeAllowAll, modeAllowListed, modeDenyAll)},
 			},
 			"egress_mode": schema.StringAttribute{
 				Optional: true, Computed: true,
 				Description: "\"allow_all\" (default), \"allow_listed\" (requires egress blocks), or \"deny_all\".",
-				Validators:  []validator.String{stringvalidator.OneOf("allow_all", "allow_listed", "deny_all")},
+				Validators:  []validator.String{stringvalidator.OneOf(modeAllowAll, modeAllowListed, modeDenyAll)},
 			},
 			"status":  schema.StringAttribute{Computed: true},
 			"user_id": schema.StringAttribute{Computed: true},
@@ -157,20 +160,12 @@ func (r *sgResource) Create(ctx context.Context, req resource.CreateRequest, res
 	}
 
 	id := out.ID
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetSecurityGroup(ctx, id)
-		if err != nil {
-			return err
-		}
-		out = got
-		if isReady(got.Status) {
-			return errStopPolling
-		}
-		if terminalFailure(got.Status) {
-			return fmt.Errorf("security group %s entered terminal status %q", id, got.Status)
-		}
-		return nil
-	}); err != nil {
+	out, err = pollUntilReady(ctx,
+		func(ctx context.Context) (*client.SecurityGroup, error) { return r.c.GetSecurityGroup(ctx, id) },
+		func(v *client.SecurityGroup) string { return v.Status },
+		"security group "+id,
+	)
+	if err != nil {
 		resp.Diagnostics.AddError("Waiting for SG failed", err.Error())
 		return
 	}
@@ -241,11 +236,11 @@ func (r *sgResource) Update(ctx context.Context, req resource.UpdateRequest, res
 
 	stateIngressMode := state.IngressMode.ValueString()
 	if stateIngressMode == "" {
-		stateIngressMode = "allow_all"
+		stateIngressMode = modeAllowAll
 	}
 	stateEgressMode := state.EgressMode.ValueString()
 	if stateEgressMode == "" {
-		stateEgressMode = "allow_all"
+		stateEgressMode = modeAllowAll
 	}
 	if ingressMode != stateIngressMode || !rulesEqual(plan.Ingress, state.Ingress) {
 		upd.IngressRules = &ingress
@@ -270,28 +265,19 @@ func (r *sgResource) Delete(ctx context.Context, req resource.DeleteRequest, res
 		return
 	}
 	id := state.ID.ValueString()
-	if err := r.c.DeleteSecurityGroup(ctx, id); err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("Delete SG failed", err.Error())
-		return
-	}
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetSecurityGroup(ctx, id)
-		if err != nil {
-			if client.IsNotFound(err) {
-				return errStopPolling
-			}
-			return err
-		}
-		if isRemoved(got.Status) {
-			return errStopPolling
-		}
-		return nil
-	}); err != nil {
-		resp.Diagnostics.AddError("Waiting for SG deletion failed", err.Error())
-	}
+	deleteAndWait(ctx, &resp.Diagnostics, id,
+		r.c.DeleteSecurityGroup,
+		func(ctx context.Context) (*client.SecurityGroup, error) { return r.c.GetSecurityGroup(ctx, id) },
+		func(v *client.SecurityGroup) string { return v.Status },
+		"security group",
+	)
 }
 
-func (r *sgResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *sgResource) ImportState(
+	ctx context.Context,
+	req resource.ImportStateRequest,
+	resp *resource.ImportStateResponse,
+) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
@@ -310,13 +296,18 @@ func (v *modeBlocksValidator) Description(_ context.Context) string {
 func (v *modeBlocksValidator) MarkdownDescription(_ context.Context) string {
 	return v.Description(context.Background())
 }
-func (v *modeBlocksValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+
+func (v *modeBlocksValidator) ValidateResource(
+	ctx context.Context,
+	req resource.ValidateConfigRequest,
+	resp *resource.ValidateConfigResponse,
+) {
 	var m sgModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &m)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	mode := "allow_all"
+	mode := modeAllowAll
 	blocks := m.Ingress
 	if v.direction == "egress" {
 		blocks = m.Egress
@@ -327,7 +318,7 @@ func (v *modeBlocksValidator) ValidateResource(ctx context.Context, req resource
 		mode = m.IngressMode.ValueString()
 	}
 	switch mode {
-	case "allow_all", "deny_all":
+	case modeAllowAll, modeDenyAll:
 		if len(blocks) > 0 {
 			resp.Diagnostics.AddAttributeError(
 				path.Root(v.direction),
@@ -335,7 +326,7 @@ func (v *modeBlocksValidator) ValidateResource(ctx context.Context, req resource
 				fmt.Sprintf("%s_mode = %q does not allow %s blocks", v.direction, mode, v.direction),
 			)
 		}
-	case "allow_listed":
+	case modeAllowListed:
 		if len(blocks) == 0 {
 			resp.Diagnostics.AddAttributeError(
 				path.Root(v.direction),
@@ -355,12 +346,12 @@ func (r *sgResource) fill(m *sgModel, sg *client.SecurityGroup, ingressMode, egr
 	m.Status = types.StringValue(sg.Status)
 	m.UserID = types.StringValue(sg.UserID)
 	m.VPCID = types.StringValue(sg.VPCID)
-	if ingressMode == "allow_listed" {
+	if ingressMode == modeAllowListed {
 		m.Ingress = rulesToModel(sg.IngressRules.Rules)
 	} else {
 		m.Ingress = nil
 	}
-	if egressMode == "allow_listed" {
+	if egressMode == modeAllowListed {
 		m.Egress = rulesToModel(sg.EgressRules.Rules)
 	} else {
 		m.Egress = nil

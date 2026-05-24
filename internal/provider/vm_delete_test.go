@@ -2,6 +2,7 @@ package provider_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -39,7 +40,7 @@ func TestUnitVM_Delete_RemovesInlineBootDisk(t *testing.T) {
 		ProtoV6ProviderFactories: h.Factories,
 		CheckDestroy: func(*terraform.State) error {
 			if bootDiskID == "" {
-				return fmt.Errorf("boot_disk_id was never captured")
+				return errors.New("boot_disk_id was never captured")
 			}
 			if _, err := h.Client.GetStorage(context.Background(), bootDiskID); err == nil {
 				return fmt.Errorf("inline boot disk %s still exists after destroy (leaked)", bootDiskID)

@@ -24,102 +24,121 @@ func (s *Server) wireStorages() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/storages", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPost:
-			var body struct {
-				ClusterID   string `json:"clusterId"`
-				Name        string `json:"name"`
-				StorageType string `json:"storageType"`
-				OSImage     string `json:"osImage"`
-				VolumeGb    uint32 `json:"volumeGb"`
-				Replicated  bool   `json:"replicated"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			id := newID()
-			role := "DATA"
-			if body.OSImage != "" {
-				role = "BOOT"
-			}
-			rec := &storageRecord{
-				ID: id, ClusterID: body.ClusterID, Name: body.Name,
-				StorageType: body.StorageType, UserID: "test-user", Status: "ready",
-				Role: role, VolumeGb: uint64(body.VolumeGb), OSImage: body.OSImage,
-			}
-			s.storageMap[id] = rec
-			s.writeJSON(w, http.StatusOK, storageWire(rec))
-		case http.MethodGet:
-			want := r.URL.Query().Get("ids")
-			items := []map[string]any{}
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			for id, st := range s.storageMap {
-				if want != "" && id != want {
-					continue
-				}
-				items = append(items, storageWire(st))
-			}
-			s.writeJSON(w, http.StatusOK, map[string]any{
-				"items":      items,
-				"pagination": map[string]int{"totalRecords": len(items), "filteredRecords": len(items), "totalPages": 1, "currentPage": 0, "perPage": 100},
-			})
-		default:
-			s.notFound(w, r)
-		}
-	})
+	s.mux.HandleFunc("/v1/storages", s.handleStorageCollection)
 	// /v1/storages/delete is an exact path; ServeMux prefers exact matches over
 	// the /v1/storages/ prefix, so register both.
-	s.mux.HandleFunc("/v1/storages/delete", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			s.notFound(w, r)
-			return
+	s.mux.HandleFunc("/v1/storages/delete", s.handleStorageBulkDelete)
+	s.mux.HandleFunc("/v1/storages/", s.handleStorageItem)
+}
+
+func (s *Server) handleStorageCollection(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		s.createStorage(w, r)
+	case http.MethodGet:
+		s.listStorages(w, r)
+	default:
+		s.notFound(w, r)
+	}
+}
+
+func (s *Server) createStorage(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ClusterID   string `json:"clusterId"`
+		Name        string `json:"name"`
+		StorageType string `json:"storageType"`
+		OSImage     string `json:"osImage"`
+		VolumeGb    uint32 `json:"volumeGb"`
+		Replicated  bool   `json:"replicated"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := newID()
+	role := "DATA"
+	if body.OSImage != "" {
+		role = "BOOT"
+	}
+	rec := &storageRecord{
+		ID: id, ClusterID: body.ClusterID, Name: body.Name,
+		StorageType: body.StorageType, UserID: "test-user", Status: "ready",
+		Role: role, VolumeGb: uint64(body.VolumeGb), OSImage: body.OSImage,
+	}
+	s.storageMap[id] = rec
+	s.writeJSON(w, http.StatusOK, storageWire(rec))
+}
+
+func (s *Server) listStorages(w http.ResponseWriter, r *http.Request) {
+	want := r.URL.Query().Get("ids")
+	items := []map[string]any{}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, st := range s.storageMap {
+		if want != "" && id != want {
+			continue
 		}
-		var body struct {
-			IDs []string `json:"ids"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		s.mu.Lock()
-		for _, id := range body.IDs {
-			delete(s.storageMap, id)
-		}
-		s.mu.Unlock()
-		w.WriteHeader(http.StatusOK)
+		items = append(items, storageWire(st))
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"pagination": map[string]int{
+			"totalRecords":    len(items),
+			"filteredRecords": len(items),
+			"totalPages":      1,
+			"currentPage":     0,
+			"perPage":         defaultPerPage,
+		},
 	})
-	s.mux.HandleFunc("/v1/storages/", func(w http.ResponseWriter, r *http.Request) {
-		// PATCH /v1/storages/{id}
-		if r.Method != http.MethodPatch {
-			s.notFound(w, r)
-			return
-		}
-		parts := splitPath(r.URL.Path)
-		if len(parts) != 3 {
-			s.notFound(w, r)
-			return
-		}
-		id := parts[2]
-		var body struct {
-			Name     *string `json:"name"`
-			VolumeGb *uint32 `json:"volumeGb"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		rec, ok := s.storageMap[id]
-		if !ok {
-			s.writeError(w, http.StatusNotFound, "storage not found")
-			return
-		}
-		if body.Name != nil {
-			rec.Name = *body.Name
-		}
-		if body.VolumeGb != nil {
-			rec.VolumeGb = uint64(*body.VolumeGb)
-		}
-		out := storageWire(rec)
-		s.writeJSON(w, http.StatusOK, out)
-	})
+}
+
+func (s *Server) handleStorageBulkDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.notFound(w, r)
+		return
+	}
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	s.mu.Lock()
+	for _, id := range body.IDs {
+		delete(s.storageMap, id)
+	}
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleStorageItem serves PATCH /v1/storages/{id}.
+func (s *Server) handleStorageItem(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		s.notFound(w, r)
+		return
+	}
+	parts := splitPath(r.URL.Path)
+	if len(parts) != resourcePathParts {
+		s.notFound(w, r)
+		return
+	}
+	id := parts[2]
+	var body struct {
+		Name     *string `json:"name"`
+		VolumeGb *uint32 `json:"volumeGb"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.storageMap[id]
+	if !ok {
+		s.writeError(w, "storage not found")
+		return
+	}
+	if body.Name != nil {
+		rec.Name = *body.Name
+	}
+	if body.VolumeGb != nil {
+		rec.VolumeGb = uint64(*body.VolumeGb)
+	}
+	s.writeJSON(w, http.StatusOK, storageWire(rec))
 }
 
 func storageWire(rec *storageRecord) map[string]any {

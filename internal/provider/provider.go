@@ -59,7 +59,11 @@ func (p *cloudlessProvider) Schema(_ context.Context, _ provider.SchemaRequest, 
 	}
 }
 
-func (p *cloudlessProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
+func (p *cloudlessProvider) Configure(
+	ctx context.Context,
+	req provider.ConfigureRequest,
+	resp *provider.ConfigureResponse,
+) {
 	if p.overrideClient != nil {
 		resp.DataSourceData = p.overrideClient
 		resp.ResourceData = p.overrideClient

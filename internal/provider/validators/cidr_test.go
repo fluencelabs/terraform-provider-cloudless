@@ -1,4 +1,4 @@
-package validators
+package validators_test
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/cloudless/terraform-provider-cloudless/internal/provider/validators"
 )
 
 func TestCIDR(t *testing.T) {
@@ -30,7 +32,7 @@ func TestCIDR(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			req := validator.StringRequest{ConfigValue: types.StringValue(c.value)}
 			resp := &validator.StringResponse{}
-			CIDR(c.family).ValidateString(context.Background(), req, resp)
+			validators.CIDR(c.family).ValidateString(context.Background(), req, resp)
 			if got := resp.Diagnostics.HasError(); got != c.wantErr {
 				t.Fatalf("CIDR(%q,%q): error=%v want %v; diags=%v", c.family, c.value, got, c.wantErr, resp.Diagnostics)
 			}

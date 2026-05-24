@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -52,26 +51,35 @@ func (r *subnetResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Validators:    []validator.String{validators.UUID()},
 			},
 			"cluster_id": schema.StringAttribute{
-				Optional:      true,
-				Computed:      true,
-				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplaceIfConfigured(), stringplanmodifier.UseStateForUnknown()},
-				Description:   "Cluster the subnet lives on. If unset, derived from vpc_id's cluster.",
-				Validators:    []validator.String{validators.UUID()},
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplaceIfConfigured(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+				Description: "Cluster the subnet lives on. If unset, derived from vpc_id's cluster.",
+				Validators:  []validator.String{validators.UUID()},
 			},
 			"name": schema.StringAttribute{Required: true},
 			"ipv4_cidr": schema.StringAttribute{
-				Optional:      true,
-				Computed:      true,
-				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplaceIfConfigured(), stringplanmodifier.UseStateForUnknown()},
-				Description:   "Optional IPv4 CIDR (e.g. 10.0.0.0/24).",
-				Validators:    []validator.String{validators.CIDR("ipv4")},
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplaceIfConfigured(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+				Description: "Optional IPv4 CIDR (e.g. 10.0.0.0/24).",
+				Validators:  []validator.String{validators.CIDR("ipv4")},
 			},
 			"ipv6_cidr": schema.StringAttribute{
-				Optional:      true,
-				Computed:      true,
-				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplaceIfConfigured(), stringplanmodifier.UseStateForUnknown()},
-				Description:   "Optional IPv6 CIDR (e.g. 2001:db8::/64).",
-				Validators:    []validator.String{validators.CIDR("ipv6")},
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplaceIfConfigured(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+				Description: "Optional IPv6 CIDR (e.g. 2001:db8::/64).",
+				Validators:  []validator.String{validators.CIDR("ipv6")},
 			},
 			"status":  schema.StringAttribute{Computed: true},
 			"user_id": schema.StringAttribute{Computed: true},
@@ -107,20 +115,12 @@ func (r *subnetResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	id := out.ID
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetSubnet(ctx, id)
-		if err != nil {
-			return err
-		}
-		out = got
-		if isReady(got.Status) {
-			return errStopPolling
-		}
-		if terminalFailure(got.Status) {
-			return fmt.Errorf("subnet %s entered terminal status %q", id, got.Status)
-		}
-		return nil
-	}); err != nil {
+	out, err = pollUntilReady(ctx,
+		func(ctx context.Context) (*client.Subnet, error) { return r.c.GetSubnet(ctx, id) },
+		func(v *client.Subnet) string { return v.Status },
+		"subnet "+id,
+	)
+	if err != nil {
 		resp.Diagnostics.AddError("Waiting for subnet failed", err.Error())
 		return
 	}
@@ -186,31 +186,19 @@ func (r *subnetResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 
 	id := state.ID.ValueString()
-	if err := r.c.DeleteSubnet(ctx, id); err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("Delete subnet failed", err.Error())
-		return
-	}
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetSubnet(ctx, id)
-		if err != nil {
-			if client.IsNotFound(err) {
-				return errStopPolling
-			}
-			return err
-		}
-		if isRemoved(got.Status) {
-			return errStopPolling
-		}
-		if terminalFailure(got.Status) {
-			return fmt.Errorf("subnet %s entered terminal status %q during delete", id, got.Status)
-		}
-		return nil
-	}); err != nil {
-		resp.Diagnostics.AddError("Waiting for subnet deletion failed", err.Error())
-	}
+	deleteAndWait(ctx, &resp.Diagnostics, id,
+		r.c.DeleteSubnet,
+		func(ctx context.Context) (*client.Subnet, error) { return r.c.GetSubnet(ctx, id) },
+		func(v *client.Subnet) string { return v.Status },
+		"subnet",
+	)
 }
 
-func (r *subnetResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *subnetResource) ImportState(
+	ctx context.Context,
+	req resource.ImportStateRequest,
+	resp *resource.ImportStateResponse,
+) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 

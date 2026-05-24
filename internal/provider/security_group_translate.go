@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,6 +10,19 @@ import (
 
 	"github.com/cloudless/terraform-provider-cloudless/internal/client"
 )
+
+// Security-group HCL mode values.
+const (
+	modeAllowAll    = "allow_all"
+	modeAllowListed = "allow_listed"
+	modeDenyAll     = "deny_all"
+)
+
+// Protocol/port sentinel meaning "all ports" (no specific port range).
+const protocolAll = "all"
+
+// portRangeParts is the number of "min-max" fields in a port range spec.
+const portRangeParts = 2
 
 // rulesEqual reports whether two []sgRule slices are semantically equal.
 func rulesEqual(a, b []sgRule) bool {
@@ -31,11 +45,11 @@ func rulesEqual(a, b []sgRule) bool {
 // types.String. Defaults unset to "allow_all".
 func normalizeMode(s types.String) (string, error) {
 	if s.IsNull() || s.IsUnknown() || s.ValueString() == "" {
-		return "allow_all", nil
+		return modeAllowAll, nil
 	}
 	v := s.ValueString()
 	switch v {
-	case "allow_all", "allow_listed", "deny_all":
+	case modeAllowAll, modeAllowListed, modeDenyAll:
 		return v, nil
 	default:
 		return "", fmt.Errorf("invalid mode: %q", v)
@@ -46,25 +60,25 @@ func normalizeMode(s types.String) (string, error) {
 func apiToMode(r client.SecurityGroupRules) string {
 	switch r.Mode {
 	case "allowAll":
-		return "allow_all"
+		return modeAllowAll
 	case "allow":
 		if len(r.Rules) == 0 {
-			return "deny_all"
+			return modeDenyAll
 		}
-		return "allow_listed"
+		return modeAllowListed
 	default:
-		return "allow_all"
+		return modeAllowAll
 	}
 }
 
 // buildRules constructs the wire SecurityGroupRules for the given mode.
 func buildRules(mode string, blocks []sgRule) (client.SecurityGroupRules, error) {
 	switch mode {
-	case "allow_all":
+	case modeAllowAll:
 		return client.SecurityGroupRules{Mode: "allowAll"}, nil
-	case "deny_all":
+	case modeDenyAll:
 		return client.SecurityGroupRules{Mode: "allow", Rules: []client.SecurityGroupRule{}}, nil
-	case "allow_listed":
+	case modeAllowListed:
 		rules := make([]client.SecurityGroupRule, 0, len(blocks))
 		for _, b := range blocks {
 			rule, err := translateRule(b)
@@ -87,7 +101,7 @@ func translateRule(b sgRule) (client.SecurityGroupRule, error) {
 
 	pk := client.ProtocolKind{Kind: b.Protocol.ValueString()}
 	switch pk.Kind {
-	case "all", "icmp":
+	case protocolAll, "icmp":
 		if b.Ports.ValueString() != "" {
 			return r, fmt.Errorf("ports must be empty for protocol %q", pk.Kind)
 		}
@@ -105,7 +119,7 @@ func translateRule(b sgRule) (client.SecurityGroupRule, error) {
 	hasCIDR := b.CIDR.ValueString() != ""
 	hasSG := b.SecurityGroupID.ValueString() != ""
 	if hasCIDR == hasSG {
-		return r, fmt.Errorf("exactly one of cidr / security_group_id is required per rule")
+		return r, errors.New("exactly one of cidr / security_group_id is required per rule")
 	}
 	if hasCIDR {
 		v := b.CIDR.ValueString()
@@ -119,7 +133,7 @@ func translateRule(b sgRule) (client.SecurityGroupRule, error) {
 }
 
 func parsePorts(s string) (client.Ports, error) {
-	if s == "" || s == "all" {
+	if s == "" || s == protocolAll {
 		return client.Ports{All: true}, nil
 	}
 	if !strings.Contains(s, "-") {
@@ -130,7 +144,7 @@ func parsePorts(s string) (client.Ports, error) {
 		p := uint16(v)
 		return client.Ports{Exact: &p}, nil
 	}
-	parts := strings.SplitN(s, "-", 2)
+	parts := strings.SplitN(s, "-", portRangeParts)
 	mn, err := strconv.ParseUint(parts[0], 10, 16)
 	if err != nil {
 		return client.Ports{}, fmt.Errorf("invalid range start %q: %w", parts[0], err)
@@ -173,17 +187,23 @@ func rulesToModel(rules []client.SecurityGroupRule) []sgRule {
 
 func portsToString(pk client.ProtocolKind) string {
 	switch pk.Kind {
-	case "all", "icmp":
+	case protocolAll, "icmp":
 		return ""
 	case "tcp", "udp":
 		if pk.Ports.All {
-			return "all"
+			return protocolAll
 		}
 		if pk.Ports.Exact != nil {
 			return strconv.FormatUint(uint64(*pk.Ports.Exact), 10)
 		}
 		if pk.Ports.RangeMin != nil && pk.Ports.RangeMax != nil {
-			return strconv.FormatUint(uint64(*pk.Ports.RangeMin), 10) + "-" + strconv.FormatUint(uint64(*pk.Ports.RangeMax), 10)
+			return strconv.FormatUint(
+				uint64(*pk.Ports.RangeMin),
+				10,
+			) + "-" + strconv.FormatUint(
+				uint64(*pk.Ports.RangeMax),
+				10,
+			)
 		}
 	}
 	return ""

@@ -12,12 +12,21 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
 
 const DefaultEndpoint = "https://api.fluence.dev"
+
+const (
+	// defaultHTTPTimeout bounds every request the client makes.
+	defaultHTTPTimeout = 60 * time.Second
+	// maxErrorBodyLen caps how much of an undecodable response body is echoed
+	// back in an error message.
+	maxErrorBodyLen = 256
+)
 
 type Client struct {
 	endpoint string
@@ -38,7 +47,7 @@ func New(endpoint, apiKey string, opts ...Option) *Client {
 	c := &Client{
 		endpoint: strings.TrimRight(endpoint, "/"),
 		apiKey:   apiKey,
-		http:     &http.Client{Timeout: 60 * time.Second},
+		http:     &http.Client{Timeout: defaultHTTPTimeout},
 		ua:       "terraform-provider-cloudless",
 	}
 	for _, o := range opts {
@@ -99,7 +108,7 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	// spec also describes an apiKey scheme with header name `X-API-KEY`. We
 	// send both so either gateway configuration works.
 	req.Header.Set("Authorization", "X-API-KEY "+c.apiKey)
-	req.Header.Set("X-API-KEY", c.apiKey)
+	req.Header.Set("X-Api-Key", c.apiKey)
 	req.Header.Set("User-Agent", c.ua)
 
 	resp, err := c.http.Do(req)
@@ -125,8 +134,8 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	}
 
 	if out != nil && len(respBody) > 0 {
-		if err := json.Unmarshal(respBody, out); err != nil {
-			return fmt.Errorf("decode response: %w (body=%q)", err, truncate(string(respBody), 256))
+		if err = json.Unmarshal(respBody, out); err != nil {
+			return fmt.Errorf("decode response: %w (body=%q)", err, truncate(string(respBody), maxErrorBodyLen))
 		}
 	}
 	return nil
@@ -443,7 +452,14 @@ func (c *Client) AddVMStorages(ctx context.Context, vmID string, storageIDs []st
 }
 
 func (c *Client) RemoveVMStorages(ctx context.Context, vmID string, storageIDs []string) error {
-	return c.do(ctx, http.MethodPost, "/v2/vms/"+vmID+"/storages/remove", nil, vmStoragesBody{DataDisks: storageIDs}, nil)
+	return c.do(
+		ctx,
+		http.MethodPost,
+		"/v2/vms/"+vmID+"/storages/remove",
+		nil,
+		vmStoragesBody{DataDisks: storageIDs},
+		nil,
+	)
 }
 
 func (c *Client) AddVMPublicIP(ctx context.Context, vmID, publicIPID string) error {
@@ -490,17 +506,15 @@ func (c *Client) FindVMByInterface(ctx context.Context, interfaceID string) (*VM
 	// pages, indexing pages 1..N as the server reports them.
 	const maxIters = 10000 // ~2M VMs at per_page=200; defensive cap if pagination metadata never converges.
 	nextPage := uint64(1)
-	for iter := 0; iter < maxIters; iter++ {
+	for range maxIters {
 		q := url.Values{"page": {FormatPage(nextPage)}, "per_page": {"200"}}
 		var resp vmsListResponse
 		if err := c.do(ctx, http.MethodGet, "/v2/vms", q, nil, &resp); err != nil {
 			return nil, err
 		}
 		for i := range resp.Items {
-			for _, ni := range resp.Items[i].NetworkInterfaces {
-				if ni == interfaceID {
-					return &resp.Items[i], nil
-				}
+			if slices.Contains(resp.Items[i].NetworkInterfaces, interfaceID) {
+				return &resp.Items[i], nil
 			}
 		}
 		if resp.Pagination.CurrentPage >= uint64(resp.Pagination.TotalPages) {
@@ -594,6 +608,7 @@ func (c *Client) ListDatacenters(ctx context.Context) ([]Datacenter, error) {
 // callers to do the join themselves.
 type EnrichedCluster struct {
 	Cluster
+
 	Region           string // = Datacenter.CountryCode
 	CityCode         string
 	DCSlug           string
@@ -731,7 +746,7 @@ func (p *ProtocolKind) UnmarshalJSON(b []byte) error {
 		p.Ports = v.Ports
 		return nil
 	}
-	return fmt.Errorf("ProtocolKind: empty object")
+	return errors.New("ProtocolKind: empty object")
 }
 
 // Ports is "all" or {exact:{value:N}} or {range:{min:M,max:N}}.
@@ -752,7 +767,7 @@ func (p Ports) MarshalJSON() ([]byte, error) {
 	if p.RangeMin != nil && p.RangeMax != nil {
 		return json.Marshal(map[string]any{"range": map[string]any{"min": *p.RangeMin, "max": *p.RangeMax}})
 	}
-	return nil, fmt.Errorf("Ports: empty value")
+	return nil, errors.New("Ports: empty value")
 }
 
 func (p *Ports) UnmarshalJSON(b []byte) error {
@@ -761,7 +776,10 @@ func (p *Ports) UnmarshalJSON(b []byte) error {
 		p.All = true
 		return nil
 	}
-	type rangePart struct{ Min, Max uint16 }
+	type rangePart struct {
+		Min uint16 `json:"min"`
+		Max uint16 `json:"max"`
+	}
 	var probe struct {
 		Exact *struct {
 			Value uint16 `json:"value"`
@@ -795,7 +813,7 @@ func (r SGRemote) MarshalJSON() ([]byte, error) {
 	if r.SecurityGroup != nil {
 		return json.Marshal(map[string]string{"securityGroup": *r.SecurityGroup})
 	}
-	return nil, fmt.Errorf("SGRemote: empty")
+	return nil, errors.New("SGRemote: empty")
 }
 
 func (r *SGRemote) UnmarshalJSON(b []byte) error {
@@ -851,7 +869,11 @@ func (c *Client) GetSecurityGroup(ctx context.Context, id string) (*SecurityGrou
 	return nil, &APIError{StatusCode: http.StatusNotFound, Message: "security group not found"}
 }
 
-func (c *Client) UpdateSecurityGroup(ctx context.Context, id string, req UpdateSecurityGroupRequest) (*SecurityGroup, error) {
+func (c *Client) UpdateSecurityGroup(
+	ctx context.Context,
+	id string,
+	req UpdateSecurityGroupRequest,
+) (*SecurityGroup, error) {
 	var out SecurityGroup
 	if err := c.do(ctx, http.MethodPatch, "/v1/security_groups/"+id, nil, req, &out); err != nil {
 		return nil, err

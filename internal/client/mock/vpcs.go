@@ -73,7 +73,7 @@ func (s *Server) wireVPCs() {
 			return
 		}
 		parts := splitPath(r.URL.Path)
-		if len(parts) != 3 {
+		if len(parts) != resourcePathParts {
 			s.notFound(w, r)
 			return
 		}
@@ -87,7 +87,7 @@ func (s *Server) wireVPCs() {
 		defer s.mu.Unlock()
 		rec, ok := s.vpcMap[id]
 		if !ok {
-			s.writeError(w, http.StatusNotFound, "vpc not found")
+			s.writeError(w, "vpc not found")
 			return
 		}
 		if body.Name != nil {
@@ -112,8 +112,14 @@ func (s *Server) handleVPCsGet(w http.ResponseWriter, r *http.Request) {
 		items = append(items, vpcWire(v))
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"items":      items,
-		"pagination": map[string]int{"totalRecords": len(items), "filteredRecords": len(items), "totalPages": 1, "currentPage": 0, "perPage": 100},
+		"items": items,
+		"pagination": map[string]int{
+			"totalRecords":    len(items),
+			"filteredRecords": len(items),
+			"totalPages":      1,
+			"currentPage":     0,
+			"perPage":         defaultPerPage,
+		},
 	})
 }
 

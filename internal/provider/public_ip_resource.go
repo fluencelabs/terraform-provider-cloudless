@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -41,24 +40,41 @@ func (r *publicIPResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 	resp.Schema = schema.Schema{
 		Description: "A public IP address allocated on a Fluence cluster.",
 		Attributes: map[string]schema.Attribute{
-			"id":         schema.StringAttribute{Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
-			"cluster_id": schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}, Validators: []validator.String{validators.UUID()}},
-			"name":       schema.StringAttribute{Required: true},
+			"id": schema.StringAttribute{
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+			},
+			"cluster_id": schema.StringAttribute{
+				Required:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+				Validators:    []validator.String{validators.UUID()},
+			},
+			"name": schema.StringAttribute{Required: true},
 			"address_type": schema.StringAttribute{
 				Required:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 				Validators:    []validator.String{stringvalidator.OneOf("V4")},
 			},
-			"address":     schema.StringAttribute{Computed: true, Description: "The actual IP address allocated by the provider."},
-			"status":      schema.StringAttribute{Computed: true},
-			"attached_to": schema.StringAttribute{Computed: true, Description: "ID of the VM the public IP is attached to, if any."},
-			"user_id":     schema.StringAttribute{Computed: true},
-			"created_at":  schema.StringAttribute{Computed: true},
+			"address": schema.StringAttribute{
+				Computed:    true,
+				Description: "The actual IP address allocated by the provider.",
+			},
+			"status": schema.StringAttribute{Computed: true},
+			"attached_to": schema.StringAttribute{
+				Computed:    true,
+				Description: "ID of the VM the public IP is attached to, if any.",
+			},
+			"user_id":    schema.StringAttribute{Computed: true},
+			"created_at": schema.StringAttribute{Computed: true},
 		},
 	}
 }
 
-func (r *publicIPResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *publicIPResource) Configure(
+	_ context.Context,
+	req resource.ConfigureRequest,
+	resp *resource.ConfigureResponse,
+) {
 	r.c = clientFromProviderData(req.ProviderData, &resp.Diagnostics)
 }
 
@@ -80,20 +96,12 @@ func (r *publicIPResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	id := out.ID
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetPublicIP(ctx, id)
-		if err != nil {
-			return err
-		}
-		out = got
-		if isReady(got.Status) {
-			return errStopPolling
-		}
-		if terminalFailure(got.Status) {
-			return fmt.Errorf("public ip %s entered terminal status %q", id, got.Status)
-		}
-		return nil
-	}); err != nil {
+	out, err = pollUntilReady(ctx,
+		func(ctx context.Context) (*client.PublicIP, error) { return r.c.GetPublicIP(ctx, id) },
+		func(v *client.PublicIP) string { return v.Status },
+		"public ip "+id,
+	)
+	if err != nil {
 		resp.Diagnostics.AddError("Waiting for public ip failed", err.Error())
 		return
 	}
@@ -139,7 +147,7 @@ func (r *publicIPResource) Update(ctx context.Context, req resource.UpdateReques
 		upd.Name = &v
 		changed = true
 	}
-	out := &client.PublicIP{}
+	var out *client.PublicIP
 	if changed {
 		got, err := r.c.UpdatePublicIP(ctx, state.ID.ValueString(), upd)
 		if err != nil {
@@ -166,31 +174,19 @@ func (r *publicIPResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 	id := state.ID.ValueString()
-	if err := r.c.DeletePublicIP(ctx, id); err != nil && !client.IsNotFound(err) {
-		resp.Diagnostics.AddError("Delete public ip failed", err.Error())
-		return
-	}
-	if err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
-		got, err := r.c.GetPublicIP(ctx, id)
-		if err != nil {
-			if client.IsNotFound(err) {
-				return errStopPolling
-			}
-			return err
-		}
-		if isRemoved(got.Status) {
-			return errStopPolling
-		}
-		if terminalFailure(got.Status) {
-			return fmt.Errorf("public ip %s entered terminal status %q during delete", id, got.Status)
-		}
-		return nil
-	}); err != nil {
-		resp.Diagnostics.AddError("Waiting for public ip deletion failed", err.Error())
-	}
+	deleteAndWait(ctx, &resp.Diagnostics, id,
+		r.c.DeletePublicIP,
+		func(ctx context.Context) (*client.PublicIP, error) { return r.c.GetPublicIP(ctx, id) },
+		func(v *client.PublicIP) string { return v.Status },
+		"public ip",
+	)
 }
 
-func (r *publicIPResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *publicIPResource) ImportState(
+	ctx context.Context,
+	req resource.ImportStateRequest,
+	resp *resource.ImportStateResponse,
+) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 

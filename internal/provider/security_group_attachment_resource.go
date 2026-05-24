@@ -27,7 +27,11 @@ type sgAttachmentModel struct {
 	VMID               types.String `tfsdk:"vm_id"`
 }
 
-func (r *sgAttachmentResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+func (r *sgAttachmentResource) Metadata(
+	_ context.Context,
+	req resource.MetadataRequest,
+	resp *resource.MetadataResponse,
+) {
 	resp.TypeName = req.ProviderTypeName + "_security_group_attachment"
 }
 
@@ -57,7 +61,11 @@ func (r *sgAttachmentResource) Schema(_ context.Context, _ resource.SchemaReques
 	}
 }
 
-func (r *sgAttachmentResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *sgAttachmentResource) Configure(
+	_ context.Context,
+	req resource.ConfigureRequest,
+	resp *resource.ConfigureResponse,
+) {
 	r.c = clientFromProviderData(req.ProviderData, &resp.Diagnostics)
 }
 
@@ -73,7 +81,7 @@ func (r *sgAttachmentResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 	sgID := plan.SecurityGroupID.ValueString()
-	if err := r.c.UpdateVMInterface(ctx, vm.ID, plan.NetworkInterfaceID.ValueString(), &sgID); err != nil {
+	if err = r.c.UpdateVMInterface(ctx, vm.ID, plan.NetworkInterfaceID.ValueString(), &sgID); err != nil {
 		resp.Diagnostics.AddError("Bind SG failed", err.Error())
 		return
 	}
@@ -138,15 +146,20 @@ func (r *sgAttachmentResource) Delete(ctx context.Context, req resource.DeleteRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if err := r.c.UpdateVMInterface(ctx, state.VMID.ValueString(), state.NetworkInterfaceID.ValueString(), nil); err != nil && !client.IsNotFound(err) {
+	if err := r.c.UpdateVMInterface(ctx, state.VMID.ValueString(), state.NetworkInterfaceID.ValueString(), nil); err != nil &&
+		!client.IsNotFound(err) {
 		resp.Diagnostics.AddError("Unbind SG failed", err.Error())
 	}
 }
 
-func (r *sgAttachmentResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *sgAttachmentResource) ImportState(
+	ctx context.Context,
+	req resource.ImportStateRequest,
+	resp *resource.ImportStateResponse,
+) {
 	// Accept either "<vm_id>:<network_interface_id>" or "<network_interface_id>".
-	parts := strings.SplitN(req.ID, ":", 2)
-	if len(parts) == 2 {
+	parts := strings.SplitN(req.ID, ":", importIDParts)
+	if len(parts) == importIDParts {
 		if parts[0] == "" || parts[1] == "" {
 			resp.Diagnostics.AddError("Invalid import ID", "expected <vm_id>:<network_interface_id>")
 			return
@@ -159,7 +172,10 @@ func (r *sgAttachmentResource) ImportState(ctx context.Context, req resource.Imp
 	// Single-id form: resolve vm_id by scanning.
 	ifaceID := req.ID
 	if ifaceID == "" {
-		resp.Diagnostics.AddError("Invalid import ID", "expected <network_interface_id> or <vm_id>:<network_interface_id>")
+		resp.Diagnostics.AddError(
+			"Invalid import ID",
+			"expected <network_interface_id> or <vm_id>:<network_interface_id>",
+		)
 		return
 	}
 	vm, err := r.c.FindVMByInterface(ctx, ifaceID)

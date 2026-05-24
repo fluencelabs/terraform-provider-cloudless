@@ -8,6 +8,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
+// portRangeParts is the number of "min-max" fields in a port range spec.
+const portRangeParts = 2
+
 // PortSpec accepts: "" (empty), "all", a port number 0-65535, or a "min-max"
 // range with min ≤ max and both in 0-65535.
 func PortSpec() validator.String { return portSpecValidator{} }
@@ -20,7 +23,12 @@ func (portSpecValidator) Description(_ context.Context) string {
 func (v portSpecValidator) MarkdownDescription(ctx context.Context) string {
 	return v.Description(ctx)
 }
-func (portSpecValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+
+func (portSpecValidator) ValidateString(
+	_ context.Context,
+	req validator.StringRequest,
+	resp *validator.StringResponse,
+) {
 	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
 		return
 	}
@@ -36,7 +44,7 @@ func (portSpecValidator) ValidateString(_ context.Context, req validator.StringR
 		return
 	}
 	parts := strings.Split(val, "-")
-	if len(parts) != 2 {
+	if len(parts) != portRangeParts {
 		resp.Diagnostics.AddAttributeError(req.Path, "Invalid port range", `expected "min-max"`)
 		return
 	}
