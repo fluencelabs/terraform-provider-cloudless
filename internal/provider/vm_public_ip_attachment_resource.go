@@ -40,7 +40,9 @@ func (r *vmPublicIPAttachmentResource) Schema(
 	resp *resource.SchemaResponse,
 ) {
 	resp.Schema = schema.Schema{
-		Description: "Attach a cloudless_public_ip to a cloudless_vm. Both attributes are ForceNew.",
+		Description: "Attach a cloudless_public_ip to a cloudless_vm. Both attributes are ForceNew. " +
+			"Attaching a public IP flags the VM restart_required; add a cloudless_vm_restart (depends_on " +
+			"this resource) to apply the change with a single restart after all attachments.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,

@@ -1,12 +1,12 @@
 ---
 page_title: "cloudless_vm_public_ip_attachment Resource - cloudless"
 description: |-
-    Attach a cloudless_public_ip to a cloudless_vm. Both attributes are ForceNew.
+    Attach a cloudless_public_ip to a cloudless_vm. Both attributes are ForceNew. Attaching a public IP flags the VM restart_required; add a cloudless_vm_restart (depends_on this resource) to apply the change with a single restart after all attachments.
 ---
 
 # cloudless_vm_public_ip_attachment (Resource)
 
-Attach a cloudless_public_ip to a cloudless_vm. Both attributes are ForceNew.
+Attach a cloudless_public_ip to a cloudless_vm. Both attributes are ForceNew. Attaching a public IP flags the VM restart_required; add a cloudless_vm_restart (depends_on this resource) to apply the change with a single restart after all attachments.
 
 ## Example Usage
 

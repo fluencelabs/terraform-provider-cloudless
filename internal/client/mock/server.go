@@ -70,6 +70,18 @@ type Server struct {
 
 	// FailRemoveVMStorages, when set, makes /v2/vms/{id}/storages/remove return 500.
 	FailRemoveVMStorages bool
+
+	// restartCount counts VM restart/softreboot calls. Guarded by s.mu; read via
+	// RestartCount so tests can assert a restart actually happened.
+	restartCount int
+}
+
+// RestartCount returns how many times a VM restart/softreboot endpoint has been
+// called against this mock.
+func (s *Server) RestartCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.restartCount
 }
 
 // SetContractEnforcement toggles OpenAPI request-body validation in the mock.
