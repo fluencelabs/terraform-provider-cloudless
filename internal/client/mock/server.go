@@ -57,15 +57,60 @@ type Server struct {
 	sshKeyMap    map[string]*sshKeyRecord
 	sshKeyWiring sync.Once
 
+	// reqBodyValidator validates incoming request bodies against the vendored
+	// public OpenAPI spec; contractEnforce toggles that enforcement (default
+	// on). SetContractEnforcement lets a test that deliberately sends a
+	// malformed body opt out.
+	reqBodyValidator  requestBodyValidator
+	respBodyValidator responseBodyValidator
+	contractEnforce   bool
+	// contractViolations records response-shape drift (the mock returning a body
+	// the spec doesn't allow). Guarded by s.mu. Tests assert it stays empty.
+	contractViolations []string
+
 	// FailRemoveVMStorages, when set, makes /v2/vms/{id}/storages/remove return 500.
 	FailRemoveVMStorages bool
+
+	// restartCount counts VM restart/softreboot calls. Guarded by s.mu; read via
+	// RestartCount so tests can assert a restart actually happened.
+	restartCount int
+}
+
+// RestartCount returns how many times a VM restart/softreboot endpoint has been
+// called against this mock.
+func (s *Server) RestartCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.restartCount
+}
+
+// SetContractEnforcement toggles OpenAPI request-body validation in the mock.
+// On by default; disable it for tests that intentionally send a body the spec
+// rejects.
+func (s *Server) SetContractEnforcement(on bool) { s.contractEnforce = on }
+
+// ContractViolations returns response-contract violations observed so far (the
+// mock's responses drifting from the spec). Empty means the mock's responses
+// conform to the vendored public API.
+func (s *Server) ContractViolations() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.contractViolations...)
 }
 
 // New starts a server and returns it. Callers must defer s.Close().
 func New() *Server {
-	s := &Server{mux: http.NewServeMux()}
+	s := &Server{mux: http.NewServeMux(), contractEnforce: true}
 	s.register(s.mux)
-	s.Server = httptest.NewServer(s.mux)
+	reqV, _, reqErr := NewPublicAPIRequestBodyValidator()
+	respV, _, respErr := NewPublicAPIResponseBodyValidator()
+	if reqErr != nil || respErr != nil {
+		// A broken vendored spec is a test-infra error, not a runtime path.
+		panic("mock: cannot build OpenAPI contract validators")
+	}
+	s.reqBodyValidator = reqV
+	s.respBodyValidator = respV
+	s.Server = httptest.NewServer(s.contractMiddleware(s.mux))
 	s.wireVPCsOnce()
 	s.wireSubnetsOnce()
 	s.wireClustersOnce()

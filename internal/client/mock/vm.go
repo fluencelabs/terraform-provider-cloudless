@@ -12,6 +12,7 @@ type vmRecord struct {
 	Subnets                                                        []string
 	Interfaces                                                     []vmInterfaceRecord
 	PublicIP                                                       string
+	RestartRequired                                                bool
 	CreatedAt, UpdatedAt                                           string
 }
 
@@ -174,6 +175,8 @@ func (s *Server) handleVMVerb(w http.ResponseWriter, r *http.Request, rec *vmRec
 	switch {
 	case verb == "terminate" && r.Method == http.MethodPost:
 		s.terminateVM(w, rec.ID)
+	case (verb == "restart" || verb == "softreboot") && r.Method == http.MethodPost:
+		s.restartVM(w, rec)
 	case verb == "interfaces" && r.Method == http.MethodGet:
 		s.listVMInterfaces(w, rec)
 	default:
@@ -204,6 +207,18 @@ func (s *Server) terminateVM(w http.ResponseWriter, vmID string) {
 	delete(s.vmMap, vmID)
 	s.mu.Unlock()
 	w.WriteHeader(http.StatusOK)
+}
+
+// restartVM serves POST /v2/vms/{id}/{restart,softreboot}. The real API clears
+// restart_required and brings the VM back up; mirror that and count the call so
+// tests can assert a restart actually happened.
+func (s *Server) restartVM(w http.ResponseWriter, rec *vmRecord) {
+	s.mu.Lock()
+	rec.RestartRequired = false
+	rec.Status = "launched"
+	s.restartCount++
+	s.mu.Unlock()
+	s.writeJSON(w, http.StatusOK, vmWire(rec))
 }
 
 func (s *Server) listVMInterfaces(w http.ResponseWriter, rec *vmRecord) {
@@ -270,6 +285,7 @@ func (s *Server) setVMPublicIP(w http.ResponseWriter, r *http.Request, rec *vmRe
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	s.mu.Lock()
 	rec.PublicIP = body.PublicIPID
+	rec.RestartRequired = true
 	s.mu.Unlock()
 	w.WriteHeader(http.StatusOK)
 }
@@ -291,6 +307,9 @@ func (s *Server) patchVMInterface(w http.ResponseWriter, r *http.Request, rec *v
 	for i := range rec.Interfaces {
 		if rec.Interfaces[i].ID == interfaceID {
 			rec.Interfaces[i].SecurityGroupID = body.SecurityGroupID
+			// Binding/unbinding a security group flags the VM for restart, just
+			// like attaching a public IP does.
+			rec.RestartRequired = true
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -306,7 +325,7 @@ func vmWire(rec *vmRecord) map[string]any {
 		"configurationId": rec.ConfigurationID,
 		"name":            rec.Name,
 		"status":          rec.Status,
-		"restartRequired": false,
+		"restartRequired": rec.RestartRequired,
 		"dataDisks":       rec.DataDisks,
 		"subnets":         rec.Subnets,
 		"sshKeys":         rec.SSHKeys,

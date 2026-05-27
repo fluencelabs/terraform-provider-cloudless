@@ -91,6 +91,18 @@ func IsConflict(err error) bool {
 	return false
 }
 
+// IsNotAcceptable reports whether err is a 406 from the API. The VM endpoints
+// return 406 ("VM is not in a status to ...") while a VM is briefly in a
+// transitional state — e.g. just after a public-IP attach — so callers retry
+// the operation until the VM settles.
+func IsNotAcceptable(err error) bool {
+	var ae *APIError
+	if errors.As(err, &ae) {
+		return ae.StatusCode == http.StatusNotAcceptable
+	}
+	return false
+}
+
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body, out any) error {
 	u := c.endpoint + path
 	if len(query) > 0 {
@@ -491,6 +503,17 @@ func (c *Client) AddVMPublicIP(ctx context.Context, vmID, publicIPID string) err
 
 func (c *Client) RemoveVMPublicIP(ctx context.Context, vmID string) error {
 	return c.do(ctx, http.MethodPost, "/v2/vms/"+vmID+"/public_ip/remove", nil, nil, nil)
+}
+
+// RestartVM hard-restarts a VM (POST /v2/vms/{id}/restart) and returns the
+// updated VM. Operations such as attaching a public IP or security group flag
+// the VM restart_required; the change does not take effect until this restart.
+func (c *Client) RestartVM(ctx context.Context, vmID string) (*VM, error) {
+	var out VM
+	if err := c.do(ctx, http.MethodPost, "/v2/vms/"+vmID+"/restart", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // VMNetworkInterface is one of the network interfaces attached to a VM. Today
