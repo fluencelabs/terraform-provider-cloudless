@@ -1,12 +1,12 @@
 ---
 page_title: "cloudless_security_group_attachment Resource - cloudless"
 description: |-
-    Bind a security group to a network interface (one SG per interface). VM ID is resolved at create-time and stored in state.
+    Bind a security group to a network interface (one SG per interface). VM ID is resolved at create-time and stored in state. Binding flags the VM restart_required; add a cloudless_vm_restart (depends_on this resource) to apply the rules with a single restart after all attachments.
 ---
 
 # cloudless_security_group_attachment (Resource)
 
-Bind a security group to a network interface (one SG per interface). VM ID is resolved at create-time and stored in state.
+Bind a security group to a network interface (one SG per interface). VM ID is resolved at create-time and stored in state. Binding flags the VM restart_required; add a cloudless_vm_restart (depends_on this resource) to apply the rules with a single restart after all attachments.
 
 ## Example Usage
 

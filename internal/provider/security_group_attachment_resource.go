@@ -37,7 +37,9 @@ func (r *sgAttachmentResource) Metadata(
 
 func (r *sgAttachmentResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Bind a security group to a network interface (one SG per interface). VM ID is resolved at create-time and stored in state.",
+		Description: "Bind a security group to a network interface (one SG per interface). VM ID is resolved at " +
+			"create-time and stored in state. Binding flags the VM restart_required; add a cloudless_vm_restart " +
+			"(depends_on this resource) to apply the rules with a single restart after all attachments.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
