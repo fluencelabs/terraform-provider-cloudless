@@ -240,11 +240,13 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		resp.Diagnostics.AddError("Waiting for VM failed", err.Error())
 		// Provision was accepted, so the VM exists and bills: record whatever
 		// the API reports so destroy can clean it up instead of orphaning it.
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
+		defer cancel()
 		if out == nil {
-			out, _ = r.c.GetVM(context.WithoutCancel(ctx), id)
+			out, _ = r.c.GetVM(sctx, id)
 		}
 		if out != nil {
-			resp.Diagnostics.Append(r.fillWithNICs(ctx, &plan, out)...)
+			resp.Diagnostics.Append(r.fillWithNICs(sctx, &plan, out)...)
 			keepBlocks()
 			resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		}
@@ -255,7 +257,9 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	// draft); this is the one step of Create that may restart the VM.
 	if aerr := attachExistingPublicNICs(ctx, r.c, id, plan.NICs); aerr != nil {
 		resp.Diagnostics.AddError("Attach public IPs failed", aerr.Error())
-		resp.Diagnostics.Append(r.fillWithNICs(ctx, &plan, out)...)
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
+		defer cancel()
+		resp.Diagnostics.Append(r.fillWithNICs(sctx, &plan, out)...)
 		keepBlocks()
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
@@ -282,16 +286,11 @@ func (r *vmResource) createDraft(ctx context.Context, plan *vmModel, bd client.D
 	}
 	id := draft.ID
 
-	discard := func(step string, err error) error {
-		// The failure may be the caller's context dying; discard on a fresh
-		// deadline so the free draft is not left behind.
-		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
-		defer cancel()
-		if derr := r.c.DeleteVMDraft(dctx, id); derr != nil && !client.IsNotFound(derr) {
-			return fmt.Errorf("%s: %w (and discarding draft %s failed: %w)", step, err, id, derr)
-		}
-		return fmt.Errorf("%s: %w", step, err)
-	}
+	// Public IPs the draft created for itself; released on discard because
+	// the draft delete's cascade is unobserved (graph @cloudless/fluence,
+	// node #1814) and a leaked address bills.
+	var ownedIPs []string
+	discard := func(step string, err error) error { return r.discardDraft(ctx, id, ownedIPs, step, err) }
 
 	if want := plan.ClusterID.ValueString(); want != draft.ClusterID {
 		if _, merr := r.c.MoveDraftVMToCluster(ctx, id, want, draft.UpdatedAt); merr != nil {
@@ -323,7 +322,8 @@ func (r *vmResource) createDraft(ctx context.Context, plan *vmModel, bd client.D
 		}
 	}
 
-	if nerr := assembleDraftNICs(ctx, r.c, id, plan.NICs); nerr != nil {
+	var nerr error
+	if ownedIPs, nerr = assembleDraftNICs(ctx, r.c, id, plan.NICs); nerr != nil {
 		return "", discard("assemble network interfaces", nerr)
 	}
 
@@ -331,6 +331,23 @@ func (r *vmResource) createDraft(ctx context.Context, plan *vmModel, bd client.D
 		return "", discard("provision", perr)
 	}
 	return id, nil
+}
+
+// discardDraft deletes a draft that failed mid-assembly, plus the public IPs
+// it created, and wraps the step's error. The failure may be the caller's
+// context dying, so the discard runs on a fresh deadline.
+func (r *vmResource) discardDraft(ctx context.Context, id string, ownedIPs []string, step string, err error) error {
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
+	defer cancel()
+	if derr := r.c.DeleteVMDraft(dctx, id); derr != nil && !client.IsNotFound(derr) {
+		return fmt.Errorf("%s: %w (and discarding draft %s failed: %w)", step, err, id, derr)
+	}
+	for _, ipID := range ownedIPs {
+		if ierr := r.c.DeletePublicIP(dctx, ipID); ierr != nil && !client.IsNotFound(ierr) {
+			return fmt.Errorf("%s: %w (and releasing draft-created public IP %s failed: %w)", step, err, ipID, ierr)
+		}
+	}
+	return fmt.Errorf("%s: %w", step, err)
 }
 
 // provisionLanded reports whether a provision call that failed in transit

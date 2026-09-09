@@ -113,7 +113,7 @@ This provider exists to call one: the **vodopad public API** (`api.fluence.dev`,
 | lint only | `make lint` (config `.golangci.yml`) |
 | format | `make fmt` |
 | docs | `make docs` (tfplugindocs); `make docs-check` fails if `docs/` is stale |
-| refresh vendored spec | `make openapi-refresh` (downloads the spec the stage API serves, normalizes to YAML; then fix whatever `make check` reports) |
+| refresh vendored spec | `make openapi-refresh` (downloads the spec the stage API serves, normalizes to YAML with `python3` + PyYAML; then fix whatever `make check` reports) |
 
 Call the gate **by name**, never assemble the chain by hand. Delegation roles live in `.claude/agents/` (`reader`, `worker`, `verifier`, `reviewer`); AGENTS.md carries no delegation doctrine beyond this pointer.
 

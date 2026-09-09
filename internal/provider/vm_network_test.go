@@ -286,6 +286,17 @@ func TestUnitVMNetwork_InvalidLayoutsFailAtPlan(t *testing.T) {
     subnet_id = "` + nicTestSubnet + `"
   }
 `, "subnet_id applies to private interfaces only"},
+		{"address_type with public_ip_id", `
+  network_interface {
+    type      = "private"
+    subnet_id = "` + nicTestSubnet + `"
+  }
+  network_interface {
+    type         = "public"
+    public_ip_id = "` + nicTestBoot + `"
+    address_type = "V4"
+  }
+`, "address_type applies only to a VM-created IP"},
 		{"private without subnet", `
   network_interface {
     type = "private"

@@ -148,8 +148,10 @@ func (s *Server) addVMInterface(w http.ResponseWriter, r *http.Request, rec *vmR
 		ni.Default = true
 		if ip, ok := s.publicIPMap[ni.PublicIP]; ok {
 			if ip.AttachedTo != "" && ip.AttachedTo != rec.ID {
-				s.writeJSON(w, http.StatusNotAcceptable,
-					map[string]string{"error": "public IP is attached to another VM", "code": "not_acceptable"})
+				// Observed on stage 0.11.1: "409 Conflict: public IP … is
+				// already attached to a VM".
+				s.writeJSON(w, http.StatusConflict,
+					map[string]string{"error": "public IP is already attached to a VM", "code": "conflict"})
 				return
 			}
 			ip.AttachedTo = rec.ID

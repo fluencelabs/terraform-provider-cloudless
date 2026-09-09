@@ -275,7 +275,9 @@ func validateNIC(i int, n vmNICModel) (bool, error) {
 		if hasStatic {
 			return false, fmt.Errorf("network_interface[%d]: static_ips apply to private interfaces only", i)
 		}
-		if knownString(n.PublicIPID) && knownString(n.AddressType) && !nicOwnsIP(n) {
+		if knownString(n.PublicIPID) && knownString(n.AddressType) {
+			// Both known in one block can only come from the configuration:
+			// the plan stamps address_type null whenever public_ip_id is set.
 			return false, fmt.Errorf(
 				"network_interface[%d]: address_type applies only to a VM-created IP; drop it or public_ip_id",
 				i,
@@ -291,14 +293,41 @@ func validateNIC(i int, n vmNICModel) (bool, error) {
 // default interface is repointed to the default block's subnet, the other
 // blocks are added, then security groups and static IPs are set
 // (graph @cloudless/fluence, node #1811).
-func assembleDraftNICs(ctx context.Context, c *client.Client, vmID string, nics []vmNICModel) error {
+func assembleDraftNICs(ctx context.Context, c *client.Client, vmID string, nics []vmNICModel) ([]string, error) {
 	if len(nics) == 0 {
-		return nil
+		return nil, nil
 	}
 	dflt, err := validateNICs(nics)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	if berr := bindDraftDefaultNIC(ctx, c, vmID, nics[dflt]); berr != nil {
+		return nil, berr
+	}
+	var ownedIPs []string
+	for i, n := range nics {
+		if i == dflt || nicAttachesExistingIP(n) {
+			// An existing public IP can only be attached to a live VM; see
+			// attachExistingPublicNICs after provision.
+			continue
+		}
+		iface, aerr := c.AddVMInterface(ctx, vmID, addRequestFor(n, true))
+		if aerr != nil {
+			return ownedIPs, fmt.Errorf("add interface %s: %w", nicKey(n), aerr)
+		}
+		if ipID := iface.PublicIPID(); ipID != "" && nicOwnsIP(n) {
+			ownedIPs = append(ownedIPs, ipID)
+		}
+		if serr := applyNICSettings(ctx, c, vmID, iface.ID, n, true); serr != nil {
+			return ownedIPs, serr
+		}
+	}
+	return ownedIPs, nil
+}
+
+// bindDraftDefaultNIC repoints the server's default interface to the default
+// block's subnet and applies that block's settings.
+func bindDraftDefaultNIC(ctx context.Context, c *client.Client, vmID string, dflt vmNICModel) error {
 	current, err := c.ListVMInterfaces(ctx, vmID)
 	if err != nil {
 		return fmt.Errorf("list draft interfaces: %w", err)
@@ -312,32 +341,13 @@ func assembleDraftNICs(ctx context.Context, c *client.Client, vmID string, nics 
 	if serverDefault == nil {
 		return errors.New("draft has no default interface")
 	}
-
-	want := nics[dflt].SubnetID.ValueString()
+	want := dflt.SubnetID.ValueString()
 	if serverDefault.SubnetID() != want {
 		if _, rerr := c.RepointVMInterface(ctx, vmID, serverDefault.ID, want); rerr != nil {
 			return fmt.Errorf("bind default interface to subnet %s: %w", want, rerr)
 		}
 	}
-	if serr := applyNICSettings(ctx, c, vmID, serverDefault.ID, nics[dflt], true); serr != nil {
-		return serr
-	}
-
-	for i, n := range nics {
-		if i == dflt || nicAttachesExistingIP(n) {
-			// An existing public IP can only be attached to a live VM; see
-			// attachExistingPublicNICs after provision.
-			continue
-		}
-		iface, aerr := c.AddVMInterface(ctx, vmID, addRequestFor(n, true))
-		if aerr != nil {
-			return fmt.Errorf("add interface %s: %w", nicKey(n), aerr)
-		}
-		if serr := applyNICSettings(ctx, c, vmID, iface.ID, n, true); serr != nil {
-			return serr
-		}
-	}
-	return nil
+	return applyNICSettings(ctx, c, vmID, serverDefault.ID, dflt, true)
 }
 
 // attachExistingPublicNICs attaches the blocks that reference an existing
@@ -555,14 +565,13 @@ func settleRemovedNICs(ctx context.Context, c *client.Client, vmID string, remov
 	for _, id := range removed {
 		gone[id] = true
 	}
-	return waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
+	var blip transientWindow
+	return waitFor(ctx, interfacePoll(), func(ctx context.Context) error {
 		ifaces, lerr := c.ListVMInterfaces(ctx, vmID)
 		if lerr != nil {
-			if isTransient(lerr) {
-				return nil
-			}
-			return lerr
+			return blip.absorb(lerr)
 		}
+		blip.clear()
 		for _, i := range ifaces {
 			if gone[i.ID] {
 				return nil // still listed; keep waiting
