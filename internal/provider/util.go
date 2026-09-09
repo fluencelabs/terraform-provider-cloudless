@@ -184,7 +184,7 @@ func isTransient(err error) bool {
 	var uerr *url.Error
 	var nerr net.Error
 	return errors.As(err, &uerr) || errors.As(err, &nerr) ||
-		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
 		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED)
 }
 

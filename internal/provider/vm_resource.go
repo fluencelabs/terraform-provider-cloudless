@@ -216,6 +216,15 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		return
 	}
 
+	// Nothing declared, nothing managed: only a configuration with blocks
+	// gets blocks in state; surfacing interfaces is import-time behaviour.
+	noBlocks := len(plan.NICs) == 0
+	keepBlocks := func() {
+		if noBlocks {
+			plan.NICs = nil
+		}
+	}
+
 	id, err := r.createDraft(ctx, &plan, bd)
 	if err != nil {
 		resp.Diagnostics.AddError("Create VM failed", err.Error())
@@ -236,6 +245,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		}
 		if out != nil {
 			resp.Diagnostics.Append(r.fillWithNICs(ctx, &plan, out)...)
+			keepBlocks()
 			resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		}
 		return
@@ -246,6 +256,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	if aerr := attachExistingPublicNICs(ctx, r.c, id, plan.NICs); aerr != nil {
 		resp.Diagnostics.AddError("Attach public IPs failed", aerr.Error())
 		resp.Diagnostics.Append(r.fillWithNICs(ctx, &plan, out)...)
+		keepBlocks()
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
 	}
@@ -255,12 +266,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	}
 
 	resp.Diagnostics.Append(r.fillWithNICs(ctx, &plan, out)...)
-	if len(plan.NICs) == 0 {
-		// Nothing declared, nothing managed: the server default is mirrored
-		// in subnet_ids only. Surfacing interfaces as blocks is for import
-		// (Read with no prior blocks), never for Create.
-		plan.NICs = nil
-	}
+	keepBlocks()
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 

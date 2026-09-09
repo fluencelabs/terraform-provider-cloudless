@@ -62,11 +62,13 @@ func DefaultNetwork(t *testing.T) (string, string) {
 	if err != nil {
 		t.Fatalf("list subnets: %v", err)
 	}
-	// Prefer the VPC's default subnet; otherwise the first ready one.
+	// Prefer the VPC's default subnet; otherwise the first ready one. A
+	// pinned FLUENCE_ACC_VPC_ID restricts the choice to that VPC.
+	pinnedVPC := os.Getenv("FLUENCE_ACC_VPC_ID")
 	var pick *client.Subnet
 	for i := range subnets {
 		sn := &subnets[i]
-		if sn.Status != "ready" {
+		if sn.Status != "ready" || (pinnedVPC != "" && sn.VPCID != pinnedVPC) {
 			continue
 		}
 		if sn.IsDefault {

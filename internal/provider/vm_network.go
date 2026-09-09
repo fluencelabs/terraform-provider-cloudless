@@ -180,7 +180,9 @@ func validateNICLayout(nics []vmNICModel, checkDefault bool) (int, error) {
 	if len(nics) == 0 {
 		return -1, nil
 	}
-	dflt, firstPrivate, public := -1, -1, 0
+	dflt, firstPrivate := -1, -1
+	subnets := map[string]int{}
+	public := 0
 	for i, n := range nics {
 		private, err := validateNIC(i, n)
 		if err != nil {
@@ -191,15 +193,18 @@ func validateNICLayout(nics []vmNICModel, checkDefault bool) (int, error) {
 		}
 		if !private {
 			public++
-			if public > 1 {
-				return -1, fmt.Errorf("network_interface[%d]: a VM can have only one public interface", i)
-			}
+		}
+		if serr := noteSubnet(subnets, i, n, private); serr != nil {
+			return -1, serr
 		}
 		if checkDefault {
 			if dflt, err = noteDefault(dflt, i, n, private); err != nil {
 				return -1, err
 			}
 		}
+	}
+	if public > 1 {
+		return -1, errors.New("network_interface: a VM can have only one public interface")
 	}
 	if dflt < 0 {
 		dflt = firstPrivate
@@ -210,6 +215,22 @@ func validateNICLayout(nics []vmNICModel, checkDefault bool) (int, error) {
 		)
 	}
 	return dflt, nil
+}
+
+// noteSubnet records which block binds a subnet and rejects a second one:
+// interfaces are keyed by their subnet, so two private blocks on one subnet
+// would be indistinguishable on the wire.
+func noteSubnet(subnets map[string]int, i int, n vmNICModel, private bool) error {
+	if !private || !knownString(n.SubnetID) {
+		return nil
+	}
+	if j, dup := subnets[n.SubnetID.ValueString()]; dup {
+		return fmt.Errorf(
+			"network_interface[%d] and [%d] bind the same subnet; one private interface per subnet", j, i,
+		)
+	}
+	subnets[n.SubnetID.ValueString()] = i
+	return nil
 }
 
 // noteDefault records block i as the default when it claims to be, rejecting
@@ -253,6 +274,12 @@ func validateNIC(i int, n vmNICModel) (bool, error) {
 		}
 		if hasStatic {
 			return false, fmt.Errorf("network_interface[%d]: static_ips apply to private interfaces only", i)
+		}
+		if knownString(n.PublicIPID) && knownString(n.AddressType) && !nicOwnsIP(n) {
+			return false, fmt.Errorf(
+				"network_interface[%d]: address_type applies only to a VM-created IP; drop it or public_ip_id",
+				i,
+			)
 		}
 		return false, nil
 	default:
@@ -322,7 +349,12 @@ func attachExistingPublicNICs(ctx context.Context, c *client.Client, vmID string
 		if !nicAttachesExistingIP(n) {
 			continue
 		}
-		iface, aerr := c.AddVMInterface(ctx, vmID, addRequestFor(n, false))
+		var iface *client.VMInterface
+		aerr := retryInterfaceOp(ctx, func(ctx context.Context) error {
+			var e error
+			iface, e = c.AddVMInterface(ctx, vmID, addRequestFor(n, false))
+			return e
+		})
 		if aerr != nil {
 			return fmt.Errorf("attach public ip %s: %w", n.PublicIPID.ValueString(), aerr)
 		}
