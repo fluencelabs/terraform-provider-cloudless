@@ -123,17 +123,10 @@ func (c *Client) RepointVMInterface(ctx context.Context, vmID, interfaceID, subn
 	return &out, nil
 }
 
-// InterfaceSettings is the body of PATCH /v2/vms/{id}/interfaces/{iface}:
-// the security group binding and, on a draft's private interface, the static
-// private IPs. Nil fields are omitted and left unchanged.
-type InterfaceSettings struct {
-	SecurityGroupID *string  `json:"securityGroupId,omitempty"`
-	StaticIPs       []string `json:"staticIps,omitempty"`
-}
-
-// SetVMInterfaceSecurityGroup binds (or with nil, unbinds) a security group.
-// The API distinguishes "absent" from null, so the null form is sent
-// explicitly.
+// SetVMInterfaceSecurityGroup binds (or with nil, unbinds) a security group
+// via PATCH /v2/vms/{id}/interfaces/{iface}. Observed on stage 0.11.2: an
+// absent securityGroupId leaves the binding unchanged, an explicit null
+// clears it — so the null form is always sent here.
 func (c *Client) SetVMInterfaceSecurityGroup(ctx context.Context, vmID, interfaceID string, sgID *string) error {
 	body := struct {
 		SecurityGroupID *string `json:"securityGroupId"`

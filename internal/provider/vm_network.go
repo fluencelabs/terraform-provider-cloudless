@@ -77,8 +77,8 @@ func networkInterfaceBlock() schema.ListNestedBlock {
 					Validators:  []validator.String{stringvalidator.OneOf(defaultPublicIPAddressType)},
 				},
 				"security_group_id": schema.StringAttribute{
-					Optional: true, Computed: true,
-					Description: "Security group bound to this interface; must belong to the VM's VPC. Read back from the API, so a server-assigned group is visible.",
+					Optional:    true,
+					Description: "Security group bound to this interface; must belong to the VM's VPC. Removing it unbinds the group.",
 					Validators:  []validator.String{validators.UUID()},
 				},
 				"static_ips": schema.ListAttribute{
@@ -523,12 +523,17 @@ func retryInterfaceOp(ctx context.Context, op func(context.Context) error) error
 // moves from releases it); any other conflict is final and surfaces at once.
 func retryInterfaceOpWith(ctx context.Context, waitOnConflict bool, op func(context.Context) error) error {
 	var last error
+	var blip transientWindow
 	err := waitFor(ctx, interfacePoll(), func(ctx context.Context) error {
 		err := op(ctx)
 		switch {
 		case err == nil:
 			return errStopPolling
-		case client.IsNotAcceptable(err) || isTransient(err) || (waitOnConflict && client.IsConflict(err)):
+		case isTransient(err):
+			last = err
+			return blip.absorb(err)
+		case client.IsNotAcceptable(err) || (waitOnConflict && client.IsConflict(err)):
+			blip.clear()
 			last = err
 			return nil
 		default:
@@ -632,18 +637,10 @@ func sameOptString(a, b *string) bool {
 // carried over from the previous blocks (graph @cloudless/fluence, node #1815).
 func nicsFromAPI(prev []vmNICModel, ifaces []client.VMInterface) []vmNICModel {
 	// No blocks configured: the server default stays unmanaged and is only
-	// mirrored in the VM-level computed lists. An imported VM has no blocks
-	// either; when it carries more than the default interface, surface them
-	// all so the user can write matching blocks.
+	// mirrored in the VM-level computed lists. Import surfaces interfaces
+	// through importNICs instead.
 	if len(prev) == 0 {
-		if len(ifaces) <= 1 {
-			return nil
-		}
-		out := make([]vmNICModel, 0, len(ifaces))
-		for _, f := range ifaces {
-			out = append(out, nicFromAPI(f, vmNICModel{}, false))
-		}
-		return out
+		return nil
 	}
 	used := make([]bool, len(ifaces))
 	out := make([]vmNICModel, 0, len(ifaces))
@@ -659,6 +656,19 @@ func nicsFromAPI(prev []vmNICModel, ifaces []client.VMInterface) []vmNICModel {
 		if !used[i] {
 			out = append(out, nicFromAPI(f, vmNICModel{}, false))
 		}
+	}
+	return out
+}
+
+// importNICs renders every interface of an imported VM as a block so the
+// user can write matching configuration. Ownership of a public IP cannot be
+// read from the API: imported public blocks carry no address_type, so the
+// VM will not release that IP on destroy unless the user declares ownership
+// by writing the block without public_ip_id.
+func importNICs(ifaces []client.VMInterface) []vmNICModel {
+	out := make([]vmNICModel, 0, len(ifaces))
+	for _, f := range ifaces {
+		out = append(out, nicFromAPI(f, vmNICModel{}, false))
 	}
 	return out
 }
@@ -717,11 +727,12 @@ func nicFromAPI(f client.VMInterface, prev vmNICModel, matched bool) vmNICModel 
 	if sub := f.SubnetID(); sub != "" {
 		n.SubnetID = types.StringValue(sub)
 	}
-	switch {
-	case len(f.StaticIPs) > 0:
+	// static_ips is what the API reports; a configured list the API did not
+	// apply must not be echoed back as if it had been.
+	if len(f.StaticIPs) > 0 {
 		n.StaticIPs = listFromStrings(f.StaticIPs)
-	case matched && !prev.StaticIPs.IsNull() && !prev.StaticIPs.IsUnknown():
-		n.StaticIPs = prev.StaticIPs
+	} else if matched && !prev.StaticIPs.IsNull() && !prev.StaticIPs.IsUnknown() && len(prev.StaticIPs.Elements()) == 0 {
+		n.StaticIPs = prev.StaticIPs // keep an explicit empty list stable
 	}
 	return n
 }
@@ -773,6 +784,22 @@ func planNICReplacement(prev, next []vmNICModel) (bool, string) {
 		return true, "the default interface's subnet changed"
 	}
 	return false, ""
+}
+
+// newNICsWithStaticIPs names a block that is new to a live VM and asks for
+// static IPs: the API sets those only while the VM is a draft, so the block
+// cannot be honoured in place.
+func newNICsWithStaticIPs(prev, next []vmNICModel) string {
+	have := map[string]bool{}
+	for _, p := range prev {
+		have[nicKey(p)] = true
+	}
+	for i, n := range next {
+		if !have[nicKey(n)] && !n.StaticIPs.IsNull() && !n.StaticIPs.IsUnknown() && len(n.StaticIPs.Elements()) > 0 {
+			return fmt.Sprintf("network_interface[%d] adds static_ips to a live VM", i)
+		}
+	}
+	return ""
 }
 
 func countOwned(nics []vmNICModel) int {

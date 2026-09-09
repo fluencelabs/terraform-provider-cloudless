@@ -104,7 +104,9 @@ func (s *Server) patchVMInterface(w http.ResponseWriter, r *http.Request, rec *v
 			}
 			rec.Interfaces[i].StaticIPs = body.StaticIPs
 		}
-		w.WriteHeader(http.StatusOK)
+		// Observed on stage 0.11.2 and per the spec: the PATCH answers the
+		// whole VM, not the interface.
+		s.writeJSON(w, http.StatusOK, vmWire(rec))
 		return
 	}
 	s.writeError(w, "interface not found")

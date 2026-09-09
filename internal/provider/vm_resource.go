@@ -248,8 +248,12 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		if out != nil {
 			resp.Diagnostics.Append(r.fillWithNICs(sctx, &plan, out)...)
 			keepBlocks()
-			resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+		} else {
+			// Even the re-read failed: keep the id and the plan's known values
+			// so destroy can still reach the VM.
+			r.fillMinimal(&plan, id)
 		}
+		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
 	}
 
@@ -587,6 +591,11 @@ func (r *vmResource) ModifyPlan(
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	if why := newNICsWithStaticIPs(state.NICs, plan.NICs); why != "" {
+		resp.Diagnostics.AddAttributeError(path.Root("network_interface"), "Unsupported network_interface change",
+			why+": the API sets static IPs only while the VM is a draft; create the VM with them or drop static_ips.")
+		return
+	}
 	if replace, why := planNICReplacement(state.NICs, plan.NICs); replace {
 		resp.Diagnostics.AddAttributeWarning(path.Root("network_interface"),
 			"VM will be replaced", why+"; a live VM cannot change this in place.")
@@ -604,16 +613,39 @@ func (r *vmResource) ModifyPlan(
 	}
 }
 
+// fillMinimal records a VM whose state could not be read after provision:
+// the id (so destroy can terminate it) with every computed field known but
+// empty. The next refresh replaces it with what the API reports.
+func (r *vmResource) fillMinimal(m *vmModel, id string) {
+	m.ID = types.StringValue(id)
+	m.Status = types.StringValue("unknown")
+	m.UserID = types.StringValue("")
+	m.BootDiskID = types.StringNull()
+	m.DataDiskIDs = listFromStrings(nil)
+	m.Subnets = listFromStrings(nil)
+	m.NetworkInterfaces = listFromStrings(nil)
+	m.PublicIPID = types.StringNull()
+	m.RestartRequired = types.BoolValue(false)
+	m.CreatedAt = types.StringValue("")
+	m.UpdatedAt = types.StringValue("")
+	m.NICs = nil
+}
+
 // fillWithNICs fills the model from the VM and its interfaces.
 func (r *vmResource) fillWithNICs(ctx context.Context, m *vmModel, v *client.VM) diag.Diagnostics {
 	var diags diag.Diagnostics
+	imported := m.Status.ValueString() == statusImported // fill overwrites status
 	r.fill(m, v)
 	ifaces, err := r.c.ListVMInterfaces(ctx, v.ID)
 	if err != nil {
 		diags.AddError("Read VM network interfaces failed", err.Error())
 		return diags
 	}
-	m.NICs = nicsFromAPI(m.NICs, ifaces)
+	if imported {
+		m.NICs = importNICs(ifaces)
+	} else {
+		m.NICs = nicsFromAPI(m.NICs, ifaces)
+	}
 	return diags
 }
 
@@ -623,6 +655,9 @@ func (r *vmResource) ImportState(
 	resp *resource.ImportStateResponse,
 ) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	// Mark the import so the first Read renders every interface as a block;
+	// a configuration without blocks otherwise keeps none.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("status"), types.StringValue(statusImported))...)
 }
 
 // fill copies API data into the model. Computed list fields use types.List

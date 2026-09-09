@@ -354,7 +354,9 @@ func waitFor(ctx context.Context, opts pollOptions, fn func(context.Context) err
 
 // Resource status strings reported by the Fluence API.
 const (
-	statusDraft      = "draft"
+	statusDraft = "draft"
+	// statusImported marks a freshly imported VM until its first Read.
+	statusImported   = "imported"
 	statusFailed     = "failed"
 	statusReady      = "ready"
 	statusLaunched   = "launched"

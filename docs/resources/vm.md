@@ -124,7 +124,7 @@ Optional:
 - `address_type` (String) Address type of a VM-created public IP (default V4). Null when public_ip_id attaches an existing IP.
 - `default` (Boolean) Marks the VM's default interface. Must be a private interface; when unset, the first private interface is the default.
 - `public_ip_id` (String) Existing public IP to attach (type = "public"). Omit to let the VM create its own; the created IP's id is then computed here.
-- `security_group_id` (String) Security group bound to this interface; must belong to the VM's VPC. Read back from the API, so a server-assigned group is visible.
+- `security_group_id` (String) Security group bound to this interface; must belong to the VM's VPC. Removing it unbinds the group.
 - `static_ips` (List of String) Static private IPs for a private interface (at most one per IP version, inside the subnet CIDR). Set only while the VM is created.
 - `subnet_id` (String) Subnet of a private interface. Required for type = "private".
 
