@@ -27,7 +27,7 @@ vet:
 	go vet ./...
 
 test:
-	go test ./... -count=1
+	go test ./... -count=1 -race
 
 # Live acceptance tests against the endpoint in FLUENCE_ENDPOINT (stage by
 # default via .env); needs FLUENCE_API_KEY. Never part of `check`.

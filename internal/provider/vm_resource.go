@@ -327,10 +327,21 @@ func (r *vmResource) createDraft(ctx context.Context, plan *vmModel, bd client.D
 		return "", discard("assemble network interfaces", nerr)
 	}
 
-	if _, perr := r.c.ProvisionVM(ctx, id); perr != nil {
+	if _, perr := r.c.ProvisionVM(ctx, id); perr != nil && !r.provisionLanded(ctx, id, perr) {
 		return "", discard("provision", perr)
 	}
 	return id, nil
+}
+
+// provisionLanded reports whether a provision call that failed in transit
+// was nevertheless accepted: a provisioned VM is no longer a draft, cannot
+// be discarded, and bills — so the caller must keep its id and poll it.
+func (r *vmResource) provisionLanded(ctx context.Context, id string, perr error) bool {
+	if !isTransient(perr) {
+		return false
+	}
+	vm, gerr := r.c.GetVM(context.WithoutCancel(ctx), id)
+	return gerr == nil && vm.Status != statusDraft
 }
 
 func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {

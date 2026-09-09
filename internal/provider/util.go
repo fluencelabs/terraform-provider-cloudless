@@ -149,14 +149,13 @@ func pollUntilReady[T any](
 	label string,
 ) (T, error) {
 	var last T
+	var blip transientWindow
 	err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
 		got, err := get(ctx)
 		if err != nil {
-			if isTransient(err) {
-				return nil // network blip; keep polling within the budget
-			}
-			return err
+			return blip.absorb(err)
 		}
+		blip.clear()
 		last = got
 		s := status(got)
 		if isReady(s) {
@@ -201,10 +200,11 @@ const interfacePollTimeout = 5 * time.Minute
 // an API answer (success or error) ends the loop at once.
 func retryTransient(ctx context.Context, fn func(context.Context) error) error {
 	var last error
+	var blip transientWindow
 	err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
 		last = fn(ctx)
 		if last != nil && isTransient(last) {
-			return nil
+			return blip.absorb(last)
 		}
 		return errStopPolling
 	})
@@ -213,6 +213,32 @@ func retryTransient(ctx context.Context, fn func(context.Context) error) error {
 	}
 	return last
 }
+
+// transientWindow bounds how long consecutive transport failures are ridden
+// out: a blip is absorbed, a dead endpoint (wrong FLUENCE_ENDPOINT, DNS gone,
+// API down) surfaces with its cause after transientBudget rather than as a
+// bare timeout at the end of the whole poll.
+type transientWindow struct {
+	since time.Time
+}
+
+const transientBudget = 3 * time.Minute
+
+func (w *transientWindow) absorb(err error) error {
+	if !isTransient(err) {
+		return err
+	}
+	if w.since.IsZero() {
+		w.since = time.Now()
+		return nil
+	}
+	if time.Since(w.since) > transientBudget {
+		return fmt.Errorf("API unreachable for %s: %w", transientBudget, err)
+	}
+	return nil
+}
+
+func (w *transientWindow) clear() { w.since = time.Time{} }
 
 // sortedCopy returns a sorted copy of in.
 func sortedCopy(in []string) []string {
@@ -278,17 +304,16 @@ func pollUntilGone[T any](
 	status func(T) string,
 	label string,
 ) error {
+	var blip transientWindow
 	return waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
 		got, err := get(ctx)
 		if err != nil {
 			if client.IsNotFound(err) {
 				return errStopPolling
 			}
-			if isTransient(err) {
-				return nil
-			}
-			return err
+			return blip.absorb(err)
 		}
+		blip.clear()
 		s := status(got)
 		if isRemoved(s) {
 			return errStopPolling

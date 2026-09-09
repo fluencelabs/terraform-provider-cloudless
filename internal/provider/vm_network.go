@@ -350,7 +350,7 @@ func attachExistingPublicNICs(ctx context.Context, c *client.Client, vmID string
 			continue
 		}
 		var iface *client.VMInterface
-		aerr := retryInterfaceOp(ctx, func(ctx context.Context) error {
+		aerr := retryInterfaceOpWith(ctx, true, func(ctx context.Context) error {
 			var e error
 			iface, e = c.AddVMInterface(ctx, vmID, addRequestFor(n, false))
 			return e
@@ -505,13 +505,20 @@ func removeUnwantedNICs(
 // interface change or a restart), 409 means a reserved IP is still held by
 // the VM it is moving from; both clear by waiting.
 func retryInterfaceOp(ctx context.Context, op func(context.Context) error) error {
+	return retryInterfaceOpWith(ctx, false, op)
+}
+
+// retryInterfaceOpWith is retryInterfaceOp with 409 optionally retried:
+// only attaching a reserved IP has a 409 that clears by waiting (the VM it
+// moves from releases it); any other conflict is final and surfaces at once.
+func retryInterfaceOpWith(ctx context.Context, waitOnConflict bool, op func(context.Context) error) error {
 	var last error
 	err := waitFor(ctx, interfacePoll(), func(ctx context.Context) error {
 		err := op(ctx)
 		switch {
 		case err == nil:
 			return errStopPolling
-		case client.IsNotAcceptable(err) || client.IsConflict(err) || isTransient(err):
+		case client.IsNotAcceptable(err) || isTransient(err) || (waitOnConflict && client.IsConflict(err)):
 			last = err
 			return nil
 		default:
@@ -580,7 +587,7 @@ func ensureLiveNIC(
 		// that resource's update runs concurrently; the API answers 409 until
 		// it is released, so retry within the poll budget.
 		var added *client.VMInterface
-		err := retryInterfaceOp(ctx, func(ctx context.Context) error {
+		err := retryInterfaceOpWith(ctx, nicAttachesExistingIP(n), func(ctx context.Context) error {
 			var aerr error
 			added, aerr = c.AddVMInterface(ctx, vmID, addRequestFor(n, false))
 			return aerr

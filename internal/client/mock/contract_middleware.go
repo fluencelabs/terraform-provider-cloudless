@@ -28,7 +28,9 @@ func (s *Server) contractMiddleware(next http.Handler) http.Handler {
 			if err == nil && len(body) > 0 {
 				probe := r.Clone(r.Context())
 				probe.Body = io.NopCloser(bytes.NewReader(body))
+				s.validateMu.Lock()
 				ok, valErrs := s.reqBodyValidator.ValidateRequestBody(probe)
+				s.validateMu.Unlock()
 				// Always restore the body for the downstream handler.
 				r.Body = io.NopCloser(bytes.NewReader(body))
 				if !ok && hasBodySchemaViolation(valErrs) {
@@ -60,7 +62,11 @@ func (s *Server) contractMiddleware(next http.Handler) http.Handler {
 func (s *Server) recordResponseViolations(r *http.Request, rec *httptest.ResponseRecorder) {
 	resp := rec.Result()
 	defer resp.Body.Close()
+	// The validator renders schemas lazily into a shared model; concurrent
+	// requests (multi-resource applies) race on it without this lock.
+	s.validateMu.Lock()
 	ok, valErrs := s.respBodyValidator.ValidateResponseBody(r, resp)
+	s.validateMu.Unlock()
 	if ok || !hasBodySchemaViolation(valErrs) {
 		return
 	}

@@ -63,7 +63,10 @@ type Server struct {
 	// malformed body opt out.
 	reqBodyValidator  requestBodyValidator
 	respBodyValidator responseBodyValidator
-	contractEnforce   bool
+	// validateMu serializes spec validation: libopenapi-validator mutates
+	// its shared schema model while rendering, so parallel requests race.
+	validateMu      sync.Mutex
+	contractEnforce bool
 	// contractViolations records response-shape drift (the mock returning a body
 	// the spec doesn't allow). Guarded by s.mu. Tests assert it stays empty.
 	contractViolations []string
