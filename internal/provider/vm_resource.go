@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -225,7 +226,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		}
 	}
 
-	id, err := r.createDraft(ctx, &plan, bd)
+	id, ownedIPs, err := r.createDraft(ctx, &plan, bd)
 	if err != nil {
 		resp.Diagnostics.AddError("Create VM failed", err.Error())
 		return
@@ -251,7 +252,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		} else {
 			// Even the re-read failed: keep the id and the plan's known values
 			// so destroy can still reach the VM.
-			r.fillMinimal(&plan, id)
+			r.fillMinimal(&plan, id, ownedIPs)
 		}
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
@@ -263,6 +264,11 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		resp.Diagnostics.AddError("Attach public IPs failed", aerr.Error())
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
 		defer cancel()
+		// Re-read so the VM-level mirrors and the blocks describe the same
+		// moment (the attach may have partly succeeded).
+		if fresh, gerr := r.c.GetVM(sctx, id); gerr == nil {
+			out = fresh
+		}
 		resp.Diagnostics.Append(r.fillWithNICs(sctx, &plan, out)...)
 		keepBlocks()
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -283,10 +289,14 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 // unallocated, so on any failure before provision it is discarded rather than
 // left for the user to find. Returns the VM ID once provision was accepted
 // (graph @cloudless/fluence, node #1790).
-func (r *vmResource) createDraft(ctx context.Context, plan *vmModel, bd client.DraftBootDisk) (string, error) {
+func (r *vmResource) createDraft(
+	ctx context.Context,
+	plan *vmModel,
+	bd client.DraftBootDisk,
+) (string, []string, error) {
 	draft, err := r.c.CreateVMDraft(ctx)
 	if err != nil {
-		return "", fmt.Errorf("create draft: %w", err)
+		return "", nil, fmt.Errorf("create draft: %w", err)
 	}
 	id := draft.ID
 
@@ -298,43 +308,43 @@ func (r *vmResource) createDraft(ctx context.Context, plan *vmModel, bd client.D
 
 	if want := plan.ClusterID.ValueString(); want != draft.ClusterID {
 		if _, merr := r.c.MoveDraftVMToCluster(ctx, id, want, draft.UpdatedAt); merr != nil {
-			return "", discard("move draft to cluster", merr)
+			return "", nil, discard("move draft to cluster", merr)
 		}
 	}
 
 	name := plan.Name.ValueString()
 	cfg := plan.ConfigurationID.ValueString()
 	if _, uerr := r.c.UpdateDraftVM(ctx, id, client.UpdateDraftVMRequest{Name: &name, ConfigurationID: &cfg}); uerr != nil {
-		return "", discard("set draft name/configuration", uerr)
+		return "", nil, discard("set draft name/configuration", uerr)
 	}
 
 	if _, berr := r.c.ReplaceDraftBootDisk(ctx, id, bd); berr != nil {
-		return "", discard("set draft boot disk", berr)
+		return "", nil, discard("set draft boot disk", berr)
 	}
 
 	// The server seeds a draft with all of the user's SSH keys; only override
 	// when the plan names a set, so an omitted ssh_key_ids keeps that default.
 	if !plan.SSHKeyIDs.IsNull() {
 		if _, kerr := r.c.ReplaceDraftSSHKeys(ctx, id, stringsFromList(plan.SSHKeyIDs)); kerr != nil {
-			return "", discard("set draft ssh keys", kerr)
+			return "", nil, discard("set draft ssh keys", kerr)
 		}
 	}
 
 	for _, storageID := range stringsFromList(plan.DataDiskIDs) {
 		if _, serr := r.c.AttachDraftDataDisk(ctx, id, storageID); serr != nil {
-			return "", discard("attach data disk "+storageID, serr)
+			return "", nil, discard("attach data disk "+storageID, serr)
 		}
 	}
 
 	var nerr error
 	if ownedIPs, nerr = assembleDraftNICs(ctx, r.c, id, plan.NICs); nerr != nil {
-		return "", discard("assemble network interfaces", nerr)
+		return "", nil, discard("assemble network interfaces", nerr)
 	}
 
 	if _, perr := r.c.ProvisionVM(ctx, id); perr != nil && !r.provisionLanded(ctx, id, perr) {
-		return "", discard("provision", perr)
+		return "", nil, discard("provision", perr)
 	}
-	return id, nil
+	return id, ownedIPs, nil
 }
 
 // discardDraft deletes a draft that failed mid-assembly, plus the public IPs
@@ -591,6 +601,12 @@ func (r *vmResource) ModifyPlan(
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	if why := adoptsDefaultElsewhere(state, plan); why != "" {
+		resp.Diagnostics.AddAttributeWarning(path.Root("network_interface"),
+			"VM will be replaced", why+"; a live VM cannot move its default interface.")
+		resp.RequiresReplace = append(resp.RequiresReplace, path.Root("network_interface"))
+		return
+	}
 	if why := newNICsWithStaticIPs(state.NICs, plan.NICs); why != "" {
 		resp.Diagnostics.AddAttributeError(path.Root("network_interface"), "Unsupported network_interface change",
 			why+": the API sets static IPs only while the VM is a draft; create the VM with them or drop static_ips.")
@@ -613,10 +629,29 @@ func (r *vmResource) ModifyPlan(
 	}
 }
 
+// adoptsDefaultElsewhere handles a VM created without network_interface
+// blocks that later declares them: the server default interface lives on
+// the VPC's default subnet and can be repointed only while the VM is a
+// draft, so blocks whose default lands elsewhere mean a new VM.
+func adoptsDefaultElsewhere(state, plan vmModel) string {
+	if len(state.NICs) != 0 || len(plan.NICs) == 0 {
+		return ""
+	}
+	dflt, err := validateNICLayout(plan.NICs, false)
+	if err != nil || dflt < 0 {
+		return ""
+	}
+	want := plan.NICs[dflt].SubnetID.ValueString()
+	if slices.Contains(stringsFromList(state.Subnets), want) {
+		return ""
+	}
+	return "network_interface declares a default subnet the VM was not created with"
+}
+
 // fillMinimal records a VM whose state could not be read after provision:
 // the id (so destroy can terminate it) with every computed field known but
 // empty. The next refresh replaces it with what the API reports.
-func (r *vmResource) fillMinimal(m *vmModel, id string) {
+func (r *vmResource) fillMinimal(m *vmModel, id string, ownedIPs []string) {
 	m.ID = types.StringValue(id)
 	m.Status = types.StringValue("unknown")
 	m.UserID = types.StringValue("")
@@ -628,7 +663,22 @@ func (r *vmResource) fillMinimal(m *vmModel, id string) {
 	m.RestartRequired = types.BoolValue(false)
 	m.CreatedAt = types.StringValue("")
 	m.UpdatedAt = types.StringValue("")
+	// Keep the public IPs the draft created so destroy releases them: the
+	// blocks carry only what makes ownership visible to releaseOwnedIPs.
 	m.NICs = nil
+	for _, ipID := range ownedIPs {
+		m.NICs = append(m.NICs, vmNICModel{
+			ID:              types.StringNull(),
+			Type:            types.StringValue(nicTypePublic),
+			SubnetID:        types.StringNull(),
+			PublicIPID:      types.StringValue(ipID),
+			AddressType:     types.StringValue(defaultPublicIPAddressType),
+			SecurityGroupID: types.StringNull(),
+			StaticIPs:       types.ListNull(types.StringType),
+			Default:         types.BoolValue(false),
+			AssignedIPs:     listFromStrings(nil),
+		})
+	}
 }
 
 // fillWithNICs fills the model from the VM and its interfaces.

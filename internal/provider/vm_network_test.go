@@ -16,11 +16,14 @@ import (
 )
 
 const (
-	nicTestCluster = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	nicTestConfig  = "cfcfcfcf-cfcf-4cfc-8cfc-cfcfcfcfcfcf"
-	nicTestSubnet  = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
-	nicTestSubnet2 = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
-	nicTestBoot    = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	// mockDefaultSubnet is the subnet the mock binds a fresh draft's default
+	// interface to (mock.defaultDraftSubnetID).
+	mockDefaultSubnet = "00000000-0000-4000-8000-0000000005b1"
+	nicTestCluster    = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	nicTestConfig     = "cfcfcfcf-cfcf-4cfc-8cfc-cfcfcfcfcfcf"
+	nicTestSubnet     = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	nicTestSubnet2    = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+	nicTestBoot       = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 )
 
 // vmWithNICs renders a cloudless_vm with the given network_interface blocks.
@@ -350,5 +353,61 @@ func TestUnitVMNetwork_DestroyReleasesOwnedPublicIP(t *testing.T) {
 `),
 			Check: captureAttr("cloudless_vm.app", "network_interface.1.public_ip_id", &ipID),
 		}},
+	})
+}
+
+// A VM created without network_interface blocks whose configuration later
+// declares them: on the server-default subnet the blocks are adopted in
+// place; on another subnet the VM is replaced, because a live default
+// interface cannot be repointed.
+func TestUnitVMNetwork_AdoptBlocksAfterCreate(t *testing.T) {
+	h := tfharness.New()
+	defer h.Close()
+	var vmID string
+	base := vmWithNICs("")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: h.Factories,
+		Steps: []resource.TestStep{
+			{
+				Config: base,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.#", "0"),
+					captureID("cloudless_vm.app", &vmID),
+				),
+			},
+			{
+				// Same subnet as the server default: adopted in place.
+				Config: vmWithNICs(`
+  network_interface {
+    type      = "private"
+    subnet_id = "` + mockDefaultSubnet + `"
+  }
+`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("cloudless_vm.app", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					requireSameID("cloudless_vm.app", &vmID),
+					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.#", "1"),
+				),
+			},
+			{
+				// A different default subnet: the VM is replaced.
+				Config: vmWithNICs(`
+  network_interface {
+    type      = "private"
+    subnet_id = "` + nicTestSubnet2 + `"
+  }
+`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("cloudless_vm.app", plancheck.ResourceActionReplace),
+					},
+				},
+			},
+		},
 	})
 }
