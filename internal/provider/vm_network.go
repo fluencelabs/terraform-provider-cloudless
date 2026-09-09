@@ -77,13 +77,14 @@ func networkInterfaceBlock() schema.ListNestedBlock {
 					Validators:  []validator.String{stringvalidator.OneOf(defaultPublicIPAddressType)},
 				},
 				"security_group_id": schema.StringAttribute{
-					Optional:    true,
-					Description: "Security group bound to this interface; must belong to the VM's VPC.",
+					Optional: true, Computed: true,
+					Description: "Security group bound to this interface; must belong to the VM's VPC. Read back from the API, so a server-assigned group is visible.",
 					Validators:  []validator.String{validators.UUID()},
 				},
 				"static_ips": schema.ListAttribute{
 					ElementType: types.StringType,
 					Optional:    true,
+					Computed:    true,
 					Description: "Static private IPs for a private interface (at most one per IP version, inside the subnet CIDR). Set only while the VM is created.",
 					Validators:  []validator.List{listvalidator.SizeAtMost(maxStaticIPsPerNIC)},
 				},
@@ -472,17 +473,30 @@ func removeUnwantedNICs(
 // interface change or a restart), 409 means a reserved IP is still held by
 // the VM it is moving from; both clear by waiting.
 func retryInterfaceOp(ctx context.Context, op func(context.Context) error) error {
-	return waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
+	var last error
+	err := waitFor(ctx, interfacePoll(), func(ctx context.Context) error {
 		err := op(ctx)
 		switch {
 		case err == nil:
 			return errStopPolling
 		case client.IsNotAcceptable(err) || client.IsConflict(err) || isTransient(err):
+			last = err
 			return nil
 		default:
 			return err
 		}
 	})
+	return withLastAnswer(err, last)
+}
+
+// withLastAnswer folds the last retried answer into a timeout error, so a
+// permanent refusal that was retried as "transitional" is not hidden behind
+// a generic timeout.
+func withLastAnswer(err, last error) error {
+	if err != nil && last != nil {
+		return fmt.Errorf("%w (last answer: %w)", err, last)
+	}
+	return err
 }
 
 // settleRemovedNICs waits until removed interfaces stop being listed on the
@@ -683,16 +697,27 @@ func planNICReplacement(prev, next []vmNICModel) (bool, string) {
 	if countOwned(prev) != countOwned(next) {
 		return true, "the set of VM-owned public IPs changed"
 	}
-	prevByKey := map[string]vmNICModel{}
+	// Match by key plus occurrence so two blocks on one subnet stay apart;
+	// owned public blocks key differently in plan and state and are guarded
+	// by countOwned above.
+	prevByKey := map[string][]vmNICModel{}
 	for _, p := range prev {
-		prevByKey[nicKey(p)] = p
+		if !nicOwnsIP(p) {
+			prevByKey[nicKey(p)] = append(prevByKey[nicKey(p)], p)
+		}
 	}
+	seen := map[string]int{}
 	for _, n := range next {
-		p, ok := prevByKey[nicKey(n)]
-		if !ok {
+		if nicOwnsIP(n) {
 			continue
 		}
-		if why := matchedNICChange(p, n); why != "" {
+		k := nicKey(n)
+		i := seen[k]
+		seen[k] = i + 1
+		if i >= len(prevByKey[k]) {
+			continue
+		}
+		if why := matchedNICChange(prevByKey[k][i], n); why != "" {
 			return true, why
 		}
 	}
@@ -791,18 +816,20 @@ func listsEqual(a, b types.List) bool {
 // state where the API answers 406; retry until it accepts the restart
 // (graph @cloudless/fluence, node #1804 questions the 406 contract).
 func restartAndWaitReady(ctx context.Context, c *client.Client, vmID string) error {
-	err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
+	var last error
+	err := waitFor(ctx, interfacePoll(), func(ctx context.Context) error {
 		_, rErr := c.RestartVM(ctx, vmID)
 		switch {
 		case rErr == nil:
 			return errStopPolling
-		case client.IsNotAcceptable(rErr):
+		case client.IsNotAcceptable(rErr) || isTransient(rErr):
+			last = rErr
 			return nil
 		default:
 			return rErr
 		}
 	})
-	if err != nil {
+	if err = withLastAnswer(err, last); err != nil {
 		return err
 	}
 	_, err = pollUntilReady(ctx,

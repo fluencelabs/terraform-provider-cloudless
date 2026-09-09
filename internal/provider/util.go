@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/url"
 	"sort"
+	"syscall"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -170,12 +174,28 @@ func pollUntilReady[T any](
 // timeout) rather than an API answer; polls ride those out instead of failing
 // an apply that the API itself has not refused.
 func isTransient(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
 	var ae *client.APIError
 	if errors.As(err, &ae) {
 		return false
 	}
-	return !errors.Is(err, context.Canceled)
+	var uerr *url.Error
+	var nerr net.Error
+	return errors.As(err, &uerr) || errors.As(err, &nerr) ||
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED)
 }
+
+// interfacePoll bounds the wait for a live VM to leave a transitional state
+// or for a moving IP to be released: minutes, not the half hour a provision
+// may take.
+func interfacePoll() pollOptions {
+	return pollOptions{Timeout: interfacePollTimeout, Interval: defaultPollInterval}
+}
+
+const interfacePollTimeout = 5 * time.Minute
 
 // retryTransient runs fn, retrying transport failures within the poll budget;
 // an API answer (success or error) ends the loop at once.

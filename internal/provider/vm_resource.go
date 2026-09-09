@@ -125,7 +125,7 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 			},
 			"public_ip_id": schema.StringAttribute{
 				Computed:      true,
-				Description:   "ID of the attached public IP, if any. Manage attachment via cloudless_vm_public_ip_attachment.",
+				Description:   "ID of the public IP attached to the VM, if any (mirror of the public network_interface block).",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"restart_required": schema.BoolAttribute{Computed: true},
@@ -255,6 +255,12 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	}
 
 	resp.Diagnostics.Append(r.fillWithNICs(ctx, &plan, out)...)
+	if len(plan.NICs) == 0 {
+		// Nothing declared, nothing managed: the server default is mirrored
+		// in subnet_ids only. Surfacing interfaces as blocks is for import
+		// (Read with no prior blocks), never for Create.
+		plan.NICs = nil
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -461,6 +467,10 @@ func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, res
 		if err := r.c.DeleteVMDraft(ctx, id); err != nil && !client.IsNotFound(err) {
 			resp.Diagnostics.AddError("Discard VM draft failed", err.Error())
 		}
+		// The draft discard is documented to cascade draft-created IPs, but
+		// that is unobserved (graph @cloudless/fluence, node #1814); release
+		// them the same way the live path does, tolerating "already gone".
+		r.releaseOwnedIPs(ctx, state.NICs, &resp.Diagnostics)
 		return
 	}
 	if err := r.c.TerminateVM(ctx, id); err != nil && !client.IsNotFound(err) {
@@ -491,13 +501,17 @@ func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, res
 		}
 	}
 
-	// Public IPs the VM created for itself (public_ip blocks) have no resource
-	// of their own; release them so they stop billing. Terminate is not known
-	// to cascade them (graph @cloudless/fluence, node #1814).
-	for _, ipID := range ownedPublicIPs(state.NICs) {
+	r.releaseOwnedIPs(ctx, state.NICs, &resp.Diagnostics)
+}
+
+// releaseOwnedIPs deletes the public IPs the VM created for itself: they
+// have no resource of their own, and terminate does not cascade them
+// (observed on stage; graph @cloudless/fluence, node #1814).
+func (r *vmResource) releaseOwnedIPs(ctx context.Context, nics []vmNICModel, diags *diag.Diagnostics) {
+	for _, ipID := range ownedPublicIPs(nics) {
 		err := retryTransient(ctx, func(ctx context.Context) error { return r.c.DeletePublicIP(ctx, ipID) })
 		if err != nil && !client.IsNotFound(err) {
-			resp.Diagnostics.AddError("Releasing VM-owned public IP "+ipID+" failed", err.Error())
+			diags.AddError("Releasing VM-owned public IP "+ipID+" failed", err.Error())
 		}
 	}
 }

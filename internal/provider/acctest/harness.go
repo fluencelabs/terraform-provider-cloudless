@@ -46,50 +46,58 @@ func RealClient() *client.Client {
 // FLUENCE_ACC_VPC_ID / FLUENCE_ACC_SUBNET_ID override the discovery.
 func DefaultNetwork(t *testing.T) (string, string) {
 	t.Helper()
-	vpcID, subnetID := os.Getenv("FLUENCE_ACC_VPC_ID"), os.Getenv("FLUENCE_ACC_SUBNET_ID")
-	if vpcID != "" && subnetID != "" {
-		return vpcID, subnetID
-	}
 	c := RealClient()
 	ctx := context.Background()
-	vpcs, err := c.ListVPCs(ctx)
-	if err != nil {
-		t.Fatalf("list vpcs: %v", err)
+	if subnetID := os.Getenv("FLUENCE_ACC_SUBNET_ID"); subnetID != "" {
+		if vpcID := os.Getenv("FLUENCE_ACC_VPC_ID"); vpcID != "" {
+			return vpcID, subnetID
+		}
+		sn, err := c.GetSubnet(ctx, subnetID)
+		if err != nil {
+			t.Fatalf("FLUENCE_ACC_SUBNET_ID %s: %v", subnetID, err)
+		}
+		return sn.VPCID, sn.ID
 	}
 	subnets, err := c.ListSubnets(ctx)
 	if err != nil {
 		t.Fatalf("list subnets: %v", err)
 	}
-	for _, sn := range subnets {
-		if sn.Status == "ready" && (sn.IsDefault || subnetID == "") {
-			subnetID, vpcID = sn.ID, sn.VPCID
+	// Prefer the VPC's default subnet; otherwise the first ready one.
+	var pick *client.Subnet
+	for i := range subnets {
+		sn := &subnets[i]
+		if sn.Status != "ready" {
+			continue
+		}
+		if sn.IsDefault {
+			pick = sn
+			break
+		}
+		if pick == nil {
+			pick = sn
 		}
 	}
-	if subnetID == "" {
-		for _, v := range vpcs {
-			if v.Status == "ready" {
-				vpcID = v.ID
-			}
-		}
+	if pick == nil {
 		t.Skip("no ready subnet on the account; create a VPC and subnet in pult or set FLUENCE_ACC_SUBNET_ID")
+		return "", "" // unreachable: Skip stops the test
 	}
-	return vpcID, subnetID
+	return pick.VPCID, pick.ID
 }
 
 // SkipUnlessVPCWrite skips the test when the key cannot create VPCs. The
 // probe VPC is deleted again when the key turns out to be allowed.
 func SkipUnlessVPCWrite(t *testing.T, clusterID string) {
 	t.Helper()
-	c := RealClient()
-	ctx := context.Background()
-	vpc, err := c.CreateVPC(ctx, client.CreateVPCRequest{ClusterID: clusterID, Name: "tf-acc-scope-probe"})
-	if client.IsForbidden(err) {
+	// Probe with a body the handler rejects (empty name): the permission check
+	// runs first, so 403 means "no vpc:write" and 400 means the scope is
+	// there — without creating a VPC on the shared stage account.
+	_, err := RealClient().CreateVPC(context.Background(), client.CreateVPCRequest{ClusterID: clusterID, Name: ""})
+	switch {
+	case client.IsForbidden(err):
 		t.Skip("API key lacks vpc:write (vodopad refuses it on keys); VPC and subnet resources cannot be exercised")
+	case err == nil:
+		t.Fatalf("scope probe unexpectedly created a VPC (empty name, cluster %s); delete it by hand", clusterID)
 	}
-	if err != nil {
-		t.Fatalf("probe vpc create: %v", err)
-	}
-	_ = c.DeleteVPC(ctx, vpc.ID)
 }
 
 // FirstClusterID returns the first cluster the account can see.
