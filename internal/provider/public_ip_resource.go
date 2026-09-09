@@ -197,7 +197,10 @@ func (r *publicIPResource) fill(m *publicIPModel, p *client.PublicIP) {
 	m.AddressType = types.StringValue(p.AddressType)
 	m.Address = stringFromPtr(p.Address)
 	m.Status = types.StringValue(p.Status)
-	m.AttachedTo = stringFromPtr(p.AttachedTo)
+	m.AttachedTo = types.StringNull()
+	if p.AttachedTo != nil {
+		m.AttachedTo = types.StringValue(p.AttachedTo.ID)
+	}
 	m.UserID = types.StringValue(p.UserID)
 	m.CreatedAt = types.StringValue(p.CreatedAt)
 }

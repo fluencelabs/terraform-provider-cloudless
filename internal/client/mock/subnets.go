@@ -8,6 +8,7 @@ import (
 type subnetRecord struct {
 	ID, Name, VPCID, ClusterID, UserID, Status string
 	IPv4, IPv6                                 string
+	Egress                                     bool
 }
 
 // wireSubnetsOnce is called from New() to register subnet handlers idempotently.
@@ -20,28 +21,31 @@ func (s *Server) wireSubnets() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/vpc/", s.handleSubnetCreate)
 	s.mux.HandleFunc("/v1/subnets", s.handleSubnetCollection)
 	s.mux.HandleFunc("/v1/subnets/delete", s.handleSubnetBulkDelete)
 }
 
-// handleSubnetCreate serves POST /v1/vpc/{vpc_id}/subnets.
+// subnetCreatePathParts is the segment count of /v1/vpcs/{vpc_id}/subnets.
+const subnetCreatePathParts = 4
+
+// handleSubnetCreate serves POST /v1/vpcs/{vpc_id}/subnets; dispatched from
+// the /v1/vpcs/ handler in vpcs.go.
 func (s *Server) handleSubnetCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.notFound(w, r)
 		return
 	}
 	parts := splitPath(r.URL.Path)
-	if len(parts) != 4 || parts[0] != "v1" || parts[1] != "vpc" || parts[3] != "subnets" {
+	if len(parts) != subnetCreatePathParts || parts[0] != "v1" || parts[1] != "vpcs" || parts[3] != "subnets" {
 		s.notFound(w, r)
 		return
 	}
 	vpcID := parts[2]
 	var body struct {
-		ClusterID string  `json:"clusterId"`
-		Name      string  `json:"name"`
-		IPv4Cidr  *string `json:"ipv4Cidr,omitempty"`
-		IPv6Cidr  *string `json:"ipv6Cidr,omitempty"`
+		Name     string  `json:"name"`
+		Egress   *bool   `json:"egress"`
+		IPv4Cidr *string `json:"ipv4Cidr,omitempty"`
+		IPv6Cidr *string `json:"ipv6Cidr,omitempty"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	s.mu.Lock()
@@ -51,7 +55,8 @@ func (s *Server) handleSubnetCreate(w http.ResponseWriter, r *http.Request) {
 		ID:        id,
 		Name:      body.Name,
 		VPCID:     vpcID,
-		ClusterID: body.ClusterID,
+		ClusterID: s.clusterOfVPC(vpcID),
+		Egress:    body.Egress == nil || *body.Egress,
 		UserID:    "test-user",
 		Status:    "ready",
 	}
@@ -113,6 +118,8 @@ func subnetWire(rec *subnetRecord) map[string]any {
 		"clusterId": rec.ClusterID,
 		"userId":    rec.UserID,
 		"status":    rec.Status,
+		"egress":    rec.Egress,
+		"isDefault": false,
 	}
 	if rec.IPv4 != "" {
 		out["ipv4Cidr"] = rec.IPv4

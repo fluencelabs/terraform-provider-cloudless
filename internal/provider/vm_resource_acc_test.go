@@ -15,8 +15,11 @@ import (
 func vmDestroy() func(*terraform.State) error {
 	c := acctest.RealClient()
 	return acctest.CheckDestroy(c, "cloudless_vm", func(ctx context.Context, id string) error {
-		_, err := c.GetVM(ctx, id)
-		return err
+		got, err := c.GetVM(ctx, id)
+		if err != nil {
+			return err
+		}
+		return acctest.GoneIf(got.Status, nil)
 	})
 }
 
@@ -31,8 +34,11 @@ func TestAccVM_RealAPI(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: fmt.Sprintf(`
-data "cloudless_cluster" "main" {
-  region = "DE"
+data "cloudless_clusters" "all" {}
+
+locals {
+  # The acceptance account may live in any region; take the first cluster it can see.
+  cluster_id = data.cloudless_clusters.all.clusters[0].id
 }
 
 data "cloudless_vm_configurations" "all" {}
@@ -40,7 +46,7 @@ data "cloudless_vm_configurations" "all" {}
 data "cloudless_default_images" "all" {}
 
 resource "cloudless_storage" "boot" {
-  cluster_id   = data.cloudless_cluster.main.id
+  cluster_id   = local.cluster_id
   name         = %q
   storage_type = "NVME"
   volume_gb    = 40
@@ -49,7 +55,7 @@ resource "cloudless_storage" "boot" {
 }
 
 resource "cloudless_vm" "app" {
-  cluster_id       = data.cloudless_cluster.main.id
+  cluster_id       = local.cluster_id
   name             = %q
   configuration_id = data.cloudless_vm_configurations.all.configurations[0].id
 

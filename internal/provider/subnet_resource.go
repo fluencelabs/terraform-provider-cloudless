@@ -98,16 +98,17 @@ func (r *subnetResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	clusterID := resolveClusterID(ctx, r.c, plan.ClusterID, plan.VPCID, &resp.Diagnostics)
+	// The API derives the cluster from the VPC and rejects clusterId in the
+	// body; resolve it only to reject a cluster_id that contradicts the VPC.
+	resolveClusterID(ctx, r.c, plan.ClusterID, plan.VPCID, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
 	out, err := r.c.CreateSubnet(ctx, plan.VPCID.ValueString(), client.CreateSubnetRequest{
-		ClusterID: clusterID,
-		Name:      plan.Name.ValueString(),
-		IPv4CIDR:  nullableString(plan.IPv4CIDR),
-		IPv6CIDR:  nullableString(plan.IPv6CIDR),
+		Name:     plan.Name.ValueString(),
+		IPv4CIDR: nullableString(plan.IPv4CIDR),
+		IPv6CIDR: nullableString(plan.IPv6CIDR),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Create subnet failed", err.Error())

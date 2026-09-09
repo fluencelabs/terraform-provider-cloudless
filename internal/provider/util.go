@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -111,10 +112,6 @@ func toStringList(in []string) []types.String {
 	return out
 }
 
-// importIDParts is the number of colon-separated fields in a composite
-// "<a>:<b>" resource import ID.
-const importIDParts = 2
-
 // pollOptions controls a wait loop. All resources use the same cadence today;
 // expose this so individual resources can extend it later.
 type pollOptions struct {
@@ -151,6 +148,9 @@ func pollUntilReady[T any](
 	err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
 		got, err := get(ctx)
 		if err != nil {
+			if isTransient(err) {
+				return nil // network blip; keep polling within the budget
+			}
 			return err
 		}
 		last = got
@@ -164,6 +164,42 @@ func pollUntilReady[T any](
 		return nil
 	})
 	return last, err
+}
+
+// isTransient reports whether err is a transport failure (connection reset,
+// timeout) rather than an API answer; polls ride those out instead of failing
+// an apply that the API itself has not refused.
+func isTransient(err error) bool {
+	var ae *client.APIError
+	if errors.As(err, &ae) {
+		return false
+	}
+	return !errors.Is(err, context.Canceled)
+}
+
+// retryTransient runs fn, retrying transport failures within the poll budget;
+// an API answer (success or error) ends the loop at once.
+func retryTransient(ctx context.Context, fn func(context.Context) error) error {
+	var last error
+	err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
+		last = fn(ctx)
+		if last != nil && isTransient(last) {
+			return nil
+		}
+		return errStopPolling
+	})
+	if err != nil {
+		return err
+	}
+	return last
+}
+
+// sortedCopy returns a sorted copy of in.
+func sortedCopy(in []string) []string {
+	out := make([]string, len(in))
+	copy(out, in)
+	sort.Strings(out)
+	return out
 }
 
 // diffStrings compares two string slices as sets and returns the elements only
@@ -228,6 +264,9 @@ func pollUntilGone[T any](
 			if client.IsNotFound(err) {
 				return errStopPolling
 			}
+			if isTransient(err) {
+				return nil
+			}
 			return err
 		}
 		s := status(got)
@@ -270,6 +309,7 @@ func waitFor(ctx context.Context, opts pollOptions, fn func(context.Context) err
 
 // Resource status strings reported by the Fluence API.
 const (
+	statusDraft      = "draft"
 	statusFailed     = "failed"
 	statusReady      = "ready"
 	statusLaunched   = "launched"

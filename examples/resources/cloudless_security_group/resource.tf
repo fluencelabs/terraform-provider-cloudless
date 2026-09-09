@@ -1,6 +1,6 @@
 resource "cloudless_security_group" "web" {
-  cluster_id = data.cloudless_cluster.main.id
-  name       = "web"
+  vpc_id = cloudless_vpc.main.id
+  name   = "web"
 
   ingress_mode = "allow_listed"
   ingress {

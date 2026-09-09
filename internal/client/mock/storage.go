@@ -9,6 +9,7 @@ type storageRecord struct {
 	ID, ClusterID, Name, StorageType, UserID, Status, Role string
 	VolumeGb                                               uint64
 	OSImage                                                string
+	Replicated                                             bool
 }
 
 // wireStoragesOnce is called from New() to register storage handlers
@@ -63,6 +64,7 @@ func (s *Server) createStorage(w http.ResponseWriter, r *http.Request) {
 		ID: id, ClusterID: body.ClusterID, Name: body.Name,
 		StorageType: body.StorageType, UserID: "test-user", Status: "ready",
 		Role: role, VolumeGb: uint64(body.VolumeGb), OSImage: body.OSImage,
+		Replicated: body.Replicated,
 	}
 	s.storageMap[id] = rec
 	s.writeJSON(w, http.StatusOK, storageWire(rec))
@@ -151,6 +153,7 @@ func storageWire(rec *storageRecord) map[string]any {
 		"status":      rec.Status,
 		"role":        rec.Role,
 		"volumeGb":    rec.VolumeGb,
+		"replicated":  rec.Replicated,
 		"attachedTo":  []string{},
 		"createdAt":   "2026-01-01T00:00:00Z",
 	}

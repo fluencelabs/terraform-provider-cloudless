@@ -12,7 +12,7 @@ const lastOctetMod = 255
 type publicIPRecord struct {
 	ID, ClusterID, Name, AddressType, UserID, Status string
 	Address                                          string // synthesized
-	// AttachedTo is set by the vm-public-ip-attachment handler (Task 8).
+	// AttachedTo is the id of the VM whose public interface holds this IP.
 	AttachedTo string
 }
 
@@ -150,7 +150,8 @@ func publicIPWire(rec *publicIPRecord) map[string]any {
 		out["address"] = rec.Address
 	}
 	if rec.AttachedTo != "" {
-		out["attachedTo"] = rec.AttachedTo
+		// UserVmReference: the API surfaces id + name of the holding VM.
+		out["attachedTo"] = map[string]any{"id": rec.AttachedTo, "name": "vm-" + rec.AttachedTo}
 	}
 	return out
 }

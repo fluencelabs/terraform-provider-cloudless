@@ -57,11 +57,9 @@ resource "cloudless_vm" "app" {
   configuration_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
   boot_disk {
-    name         = "boot"
-    storage_type = "NVME"
-    volume_gb    = 40
-    replicated   = false
-    os_image     = "https://example.com/img.qcow2"
+    name      = "boot"
+    volume_gb = 40
+    image_id  = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
   }
 }
 `,

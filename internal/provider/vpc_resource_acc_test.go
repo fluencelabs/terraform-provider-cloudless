@@ -15,13 +15,17 @@ import (
 func vpcDestroy() func(*terraform.State) error {
 	c := acctest.RealClient()
 	return acctest.CheckDestroy(c, "cloudless_vpc", func(ctx context.Context, id string) error {
-		_, err := c.GetVPC(ctx, id)
-		return err
+		got, err := c.GetVPC(ctx, id)
+		if err != nil {
+			return err
+		}
+		return acctest.GoneIf(got.Status, nil)
 	})
 }
 
 func TestAccVPC_RealAPI(t *testing.T) {
 	factories := acctest.Setup(t)
+	acctest.SkipUnlessVPCWrite(t, acctest.FirstClusterID(t))
 	name := "tf-acc-vpc-" + tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
 	renamed := name + "-renamed"
 
@@ -31,12 +35,15 @@ func TestAccVPC_RealAPI(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: fmt.Sprintf(`
-data "cloudless_cluster" "main" {
-  region = "DE"
+data "cloudless_clusters" "all" {}
+
+locals {
+  # The acceptance account may live in any region; take the first cluster it can see.
+  cluster_id = data.cloudless_clusters.all.clusters[0].id
 }
 
 resource "cloudless_vpc" "main" {
-  cluster_id = data.cloudless_cluster.main.id
+  cluster_id = local.cluster_id
   name       = %q
 }
 `, name),
@@ -47,12 +54,15 @@ resource "cloudless_vpc" "main" {
 			},
 			{
 				Config: fmt.Sprintf(`
-data "cloudless_cluster" "main" {
-  region = "DE"
+data "cloudless_clusters" "all" {}
+
+locals {
+  # The acceptance account may live in any region; take the first cluster it can see.
+  cluster_id = data.cloudless_clusters.all.clusters[0].id
 }
 
 resource "cloudless_vpc" "main" {
-  cluster_id = data.cloudless_cluster.main.id
+  cluster_id = local.cluster_id
   name       = %q
 }
 `, renamed),

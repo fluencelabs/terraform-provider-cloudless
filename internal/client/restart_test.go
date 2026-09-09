@@ -8,8 +8,8 @@ import (
 	"github.com/cloudless/terraform-provider-cloudless/internal/client/mock"
 )
 
-// Attaching a public IP flags the VM restart_required; the attached IP does not
-// route until the VM is restarted. RestartVM must clear that flag.
+// Removing an interface from a live VM flags it restart_required; the change
+// takes effect on restart. RestartVM must clear that flag.
 func TestRestartVM_ClearsRestartRequired(t *testing.T) {
 	srv := mock.New()
 	defer srv.Close()
@@ -17,25 +17,28 @@ func TestRestartVM_ClearsRestartRequired(t *testing.T) {
 	ctx := context.Background()
 
 	storageID := "33333333-3333-3333-3333-333333333333"
-	vm, err := c.CreateVM(ctx, client.CreateVMRequest{
-		ClusterID:       "11111111-1111-1111-1111-111111111111",
-		Name:            "app",
-		ConfigurationID: "22222222-2222-2222-2222-222222222222",
-		BootDisk:        client.VMBootDisk{StorageID: &storageID},
-	})
+	vm, err := seedLiveVM(ctx, c, storageID)
 	if err != nil {
 		t.Fatalf("create vm: %v", err)
 	}
 
-	if err = c.AddVMPublicIP(ctx, vm.ID, "44444444-4444-4444-4444-444444444444"); err != nil {
-		t.Fatalf("add public ip: %v", err)
+	iface, err := c.AddVMInterface(ctx, vm.ID, client.AddInterfaceRequest{
+		Public: true, PublicIPID: "44444444-4444-4444-4444-444444444444",
+	})
+	if err != nil {
+		t.Fatalf("add public interface: %v", err)
+	}
+	// Observed on stage: attaching applies at once; removing an interface is
+	// what flags the VM restart_required.
+	if err = c.RemoveVMInterface(ctx, vm.ID, iface.ID); err != nil {
+		t.Fatalf("remove public interface: %v", err)
 	}
 	got, err := c.GetVM(ctx, vm.ID)
 	if err != nil {
 		t.Fatalf("get vm: %v", err)
 	}
 	if !got.RestartRequired {
-		t.Fatal("attaching a public IP should set restart_required")
+		t.Fatal("removing an interface should set restart_required")
 	}
 
 	out, err := c.RestartVM(ctx, vm.ID)
@@ -45,4 +48,17 @@ func TestRestartVM_ClearsRestartRequired(t *testing.T) {
 	if out.RestartRequired {
 		t.Fatal("restart should clear restart_required, got true")
 	}
+}
+
+// seedLiveVM provisions a VM through the /v3 draft flow with an existing boot
+// disk and returns the live VM.
+func seedLiveVM(ctx context.Context, c *client.Client, bootStorageID string) (*client.VM, error) {
+	draft, err := c.CreateVMDraft(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, berr := c.ReplaceDraftBootDisk(ctx, draft.ID, client.DraftBootDisk{StorageID: &bootStorageID}); berr != nil {
+		return nil, berr
+	}
+	return c.ProvisionVM(ctx, draft.ID)
 }

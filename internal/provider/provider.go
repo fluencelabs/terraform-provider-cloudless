@@ -108,9 +108,6 @@ func (p *cloudlessProvider) Resources(_ context.Context) []func() resource.Resou
 		NewSecurityGroupResource,
 		NewStorageResource,
 		NewPublicIPResource,
-		NewVMPublicIPAttachmentResource,
-		NewSecurityGroupAttachmentResource,
-		NewVMRestartResource,
 	}
 }
 

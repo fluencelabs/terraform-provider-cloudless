@@ -11,6 +11,32 @@ A virtual machine on a Fluence cluster.
 ## Example Usage
 
 ```terraform
+# A VM with its network assembled in one apply: a private default interface
+# in a subnet with a security group, plus a public IP the VM creates and owns.
+resource "cloudless_vm" "web" {
+  cluster_id       = data.cloudless_cluster.main.id
+  name             = "web"
+  configuration_id = data.cloudless_vm_configurations.all.configurations[0].id
+  ssh_key_ids      = [cloudless_ssh_key.me.id]
+
+  boot_disk {
+    volume_gb = 40
+    image_id  = [for i in data.cloudless_default_images.all.images : i.id if i.slug == "ubuntu-24-04-x64"][0]
+  }
+
+  network_interface {
+    type              = "private"
+    subnet_id         = cloudless_subnet.default.id
+    security_group_id = cloudless_security_group.web.id
+  }
+
+  network_interface {
+    type = "public" # no public_ip_id: the VM creates and owns the address
+  }
+}
+
+# Boot from a storage volume you manage separately and attach a public IP that
+# outlives the VM.
 resource "cloudless_storage" "boot" {
   cluster_id   = data.cloudless_cluster.main.id
   name         = "app-boot"
@@ -20,12 +46,29 @@ resource "cloudless_storage" "boot" {
   os_image     = data.cloudless_default_images.all.images[0].download_url
 }
 
+resource "cloudless_public_ip" "app" {
+  cluster_id   = data.cloudless_cluster.main.id
+  name         = "app"
+  address_type = "V4"
+}
+
 resource "cloudless_vm" "app" {
   cluster_id       = data.cloudless_cluster.main.id
   name             = "app"
   configuration_id = data.cloudless_vm_configurations.all.configurations[0].id
   ssh_key_ids      = [cloudless_ssh_key.me.id]
+
   boot_disk { storage_id = cloudless_storage.boot.id }
+
+  network_interface {
+    type      = "private"
+    subnet_id = cloudless_subnet.default.id
+  }
+
+  network_interface {
+    type         = "public"
+    public_ip_id = cloudless_public_ip.app.id
+  }
 }
 ```
 
@@ -40,8 +83,9 @@ resource "cloudless_vm" "app" {
 
 ### Optional
 
-- `boot_disk` (Block, Optional) Boot disk: either reference an existing storage_id or supply name + storage_type + volume_gb + replicated + os_image to create one inline. The boot disk cannot be changed in place; any modification forces a new VM. (see [below for nested schema](#nestedblock--boot_disk))
+- `boot_disk` (Block, Optional) Boot disk: either reference an existing storage_id, or supply volume_gb + image_id (+ name) to create one from the image catalog while the VM is a draft. The boot disk cannot be changed in place; any modification forces a new VM. (see [below for nested schema](#nestedblock--boot_disk))
 - `data_disk_ids` (List of String) IDs of data storage volumes to attach. Add/remove via the smart Update path; not a force-replace.
+- `network_interface` (Block List) Network interfaces of the VM. type = "private" binds a subnet (subnet_id); type = "public" attaches an existing cloudless_public_ip (public_ip_id) or, when public_ip_id is omitted, makes the VM create and own a public IP of address_type that is released on destroy. Exactly one private interface is the default; omit the blocks entirely to keep the server default (the VPC's default subnet). Interfaces are assembled before the VM is provisioned, so no restart is needed. On a live VM interfaces can be added and removed and their security group changed; changing a subnet, static IPs, the default, or a VM-owned public IP forces a new VM. (see [below for nested schema](#nestedblock--network_interface))
 - `ssh_key_ids` (List of String) SSH keys to install at first boot. Changing this forces a new VM — Fluence applies SSH keys at create time only.
 
 ### Read-Only
@@ -62,11 +106,31 @@ resource "cloudless_vm" "app" {
 
 Optional:
 
-- `name` (String)
-- `os_image` (String) URL of an OS image (only valid for inline-create boot disk).
-- `replicated` (Boolean)
-- `storage_id` (String) Existing storage ID to attach. Mutually exclusive with the inline create fields.
-- `storage_type` (String)
-- `volume_gb` (Number)
+- `image_id` (String) Catalog image id for the inline-created boot disk (a 32-hex id, not a UUID). See the cloudless_default_images data source.
+- `name` (String) Name of the inline-created boot disk. Defaults to a server-chosen name.
+- `storage_id` (String) Existing storage ID to use as the boot disk. Mutually exclusive with the inline create fields.
+- `volume_gb` (Number) Size of the inline-created boot disk in GB.
+
+
+<a id="nestedblock--network_interface"></a>
+### Nested Schema for `network_interface`
+
+Required:
+
+- `type` (String) "private" (subnet) or "public" (public IP).
+
+Optional:
+
+- `address_type` (String) Address type of a VM-created public IP (default V4). Null when public_ip_id attaches an existing IP.
+- `default` (Boolean) Marks the VM's default interface. Must be a private interface; when unset, the first private interface is the default.
+- `public_ip_id` (String) Existing public IP to attach (type = "public"). Omit to let the VM create its own; the created IP's id is then computed here.
+- `security_group_id` (String) Security group bound to this interface; must belong to the VM's VPC.
+- `static_ips` (List of String) Static private IPs for a private interface (at most one per IP version, inside the subnet CIDR). Set only while the VM is created.
+- `subnet_id` (String) Subnet of a private interface. Required for type = "private".
+
+Read-Only:
+
+- `assigned_ips` (List of String) Addresses observed on the live VM for this interface.
+- `id` (String)
 
 

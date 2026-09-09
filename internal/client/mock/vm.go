@@ -9,16 +9,9 @@ type vmRecord struct {
 	ID, ClusterID, ConfigurationID, Name, UserID, Status, BootDisk string
 	DataDisks                                                      []string
 	SSHKeys                                                        []string
-	Subnets                                                        []string
 	Interfaces                                                     []vmInterfaceRecord
-	PublicIP                                                       string
 	RestartRequired                                                bool
 	CreatedAt, UpdatedAt                                           string
-}
-
-type vmInterfaceRecord struct {
-	ID              string
-	SecurityGroupID *string
 }
 
 // wireVMsOnce is called from New() to register VM handlers idempotently. Per
@@ -42,6 +35,7 @@ func (s *Server) wireVMs() {
 
 	s.mux.HandleFunc("/v2/vms", s.handleVMCollection)
 	s.mux.HandleFunc("/v2/vms/", s.handleVMItem)
+	s.wireVMDrafts()
 }
 
 func (s *Server) handleVMCollection(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +89,7 @@ func (s *Server) createVM(w http.ResponseWriter, r *http.Request) {
 	}
 	// Auto-create one network interface so the network_interface_ids list is
 	// populated from a Get response.
-	rec.Interfaces = []vmInterfaceRecord{{ID: newID()}}
+	rec.Interfaces = []vmInterfaceRecord{newDefaultInterface()}
 	s.vmMap[id] = rec
 	s.writeJSON(w, http.StatusOK, vmWire(rec))
 }
@@ -177,7 +171,7 @@ func (s *Server) handleVMVerb(w http.ResponseWriter, r *http.Request, rec *vmRec
 		s.terminateVM(w, rec.ID)
 	case (verb == "restart" || verb == "softreboot") && r.Method == http.MethodPost:
 		s.restartVM(w, rec)
-	case verb == "interfaces" && r.Method == http.MethodGet:
+	case verb == interfacesVerb && r.Method == http.MethodGet:
 		s.listVMInterfaces(w, rec)
 	default:
 		s.notFound(w, r)
@@ -187,15 +181,11 @@ func (s *Server) handleVMVerb(w http.ResponseWriter, r *http.Request, rec *vmRec
 // handleVMSubresource serves /v2/vms/{id}/{group}/{action}.
 func (s *Server) handleVMSubresource(w http.ResponseWriter, r *http.Request, rec *vmRecord, group, action string) {
 	switch {
-	case group == "storages" && action == "add" && r.Method == http.MethodPost:
+	case group == storagesVerb && action == "add" && r.Method == http.MethodPost:
 		s.addVMStorages(w, r, rec)
-	case group == "storages" && action == "remove" && r.Method == http.MethodPost:
+	case group == storagesVerb && action == "remove" && r.Method == http.MethodPost:
 		s.removeVMStorages(w, r, rec)
-	case group == "public_ip" && action == "add" && r.Method == http.MethodPost:
-		s.setVMPublicIP(w, r, rec)
-	case group == "public_ip" && action == "remove" && r.Method == http.MethodPost:
-		s.clearVMPublicIP(w, rec)
-	case group == "interfaces" && r.Method == http.MethodPatch:
+	case group == interfacesVerb && r.Method == http.MethodPatch:
 		s.patchVMInterface(w, r, rec, action)
 	default:
 		s.notFound(w, r)
@@ -219,20 +209,6 @@ func (s *Server) restartVM(w http.ResponseWriter, rec *vmRecord) {
 	s.restartCount++
 	s.mu.Unlock()
 	s.writeJSON(w, http.StatusOK, vmWire(rec))
-}
-
-func (s *Server) listVMInterfaces(w http.ResponseWriter, rec *vmRecord) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]map[string]any, 0, len(rec.Interfaces))
-	for _, ni := range rec.Interfaces {
-		m := map[string]any{"id": ni.ID}
-		if ni.SecurityGroupID != nil {
-			m["securityGroupId"] = *ni.SecurityGroupID
-		}
-		out = append(out, m)
-	}
-	s.writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) addVMStorages(w http.ResponseWriter, r *http.Request, rec *vmRecord) {
@@ -278,45 +254,6 @@ func (s *Server) removeVMStorages(w http.ResponseWriter, r *http.Request, rec *v
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *Server) setVMPublicIP(w http.ResponseWriter, r *http.Request, rec *vmRecord) {
-	var body struct {
-		PublicIPID string `json:"publicIpId"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	s.mu.Lock()
-	rec.PublicIP = body.PublicIPID
-	rec.RestartRequired = true
-	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
-}
-
-func (s *Server) clearVMPublicIP(w http.ResponseWriter, rec *vmRecord) {
-	s.mu.Lock()
-	rec.PublicIP = ""
-	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
-}
-
-func (s *Server) patchVMInterface(w http.ResponseWriter, r *http.Request, rec *vmRecord, interfaceID string) {
-	var body struct {
-		SecurityGroupID *string `json:"securityGroupId"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range rec.Interfaces {
-		if rec.Interfaces[i].ID == interfaceID {
-			rec.Interfaces[i].SecurityGroupID = body.SecurityGroupID
-			// Binding/unbinding a security group flags the VM for restart, just
-			// like attaching a public IP does.
-			rec.RestartRequired = true
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-	}
-	s.writeError(w, "interface not found")
-}
-
 func vmWire(rec *vmRecord) map[string]any {
 	out := map[string]any{
 		"id":              rec.ID,
@@ -326,22 +263,27 @@ func vmWire(rec *vmRecord) map[string]any {
 		"name":            rec.Name,
 		"status":          rec.Status,
 		"restartRequired": rec.RestartRequired,
+		"allowedActions":  []string{},
 		"dataDisks":       rec.DataDisks,
-		"subnets":         rec.Subnets,
 		"sshKeys":         rec.SSHKeys,
 		"createdAt":       rec.CreatedAt,
 		"updatedAt":       rec.UpdatedAt,
 	}
 	ifaceIDs := make([]string, 0, len(rec.Interfaces))
+	subnets := []string{}
 	for _, ni := range rec.Interfaces {
 		ifaceIDs = append(ifaceIDs, ni.ID)
+		switch {
+		case ni.PublicIP != "":
+			out["publicIp"] = ni.PublicIP
+		case ni.Subnet != "":
+			subnets = append(subnets, ni.Subnet)
+		}
 	}
 	out["networkInterfaces"] = ifaceIDs
+	out["subnets"] = subnets
 	if rec.BootDisk != "" {
 		out["bootDisk"] = rec.BootDisk
-	}
-	if rec.PublicIP != "" {
-		out["publicIp"] = rec.PublicIP
 	}
 	return out
 }

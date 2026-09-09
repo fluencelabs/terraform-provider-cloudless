@@ -17,9 +17,7 @@ compute marketplace.
 | `cloudless_security_group` | Firewall rules. `ingress_mode` / `egress_mode` enum: `allow_all` (default) / `allow_listed` / `deny_all`. |
 | `cloudless_storage` | Block storage volume. `volume_gb` is in-place resizable via PATCH. |
 | `cloudless_public_ip` | Static IPv4 address. |
-| `cloudless_vm` | A VM. Boot disk inline or referenced by ID. `data_disk_ids` smart-Updates without VM recreation. |
-| `cloudless_vm_public_ip_attachment` | Bind a public IP to a VM. |
-| `cloudless_security_group_attachment` | Bind a security group to a VM's network interface. |
+| `cloudless_vm` | A VM. Boot disk inline or referenced by ID; `network_interface` blocks for subnets, public IPs and security groups; `data_disk_ids` smart-Updates without VM recreation. |
 
 ## Data sources
 

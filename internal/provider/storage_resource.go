@@ -172,9 +172,20 @@ func (r *storageResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 	var out *client.Storage
 	if changed {
-		got, err := r.c.UpdateStorage(ctx, state.ID.ValueString(), upd)
-		if err != nil {
+		if _, err := r.c.UpdateStorage(ctx, state.ID.ValueString(), upd); err != nil {
 			resp.Diagnostics.AddError("Update storage failed", err.Error())
+			return
+		}
+		// A resize goes through "updating"; wait for the volume to settle so
+		// state and a later import agree.
+		id := state.ID.ValueString()
+		got, err := pollUntilReady(ctx,
+			func(ctx context.Context) (*client.Storage, error) { return r.c.GetStorage(ctx, id) },
+			func(st *client.Storage) string { return st.Status },
+			"storage "+id,
+		)
+		if err != nil {
+			resp.Diagnostics.AddError("Waiting for storage update failed", err.Error())
 			return
 		}
 		out = got
@@ -219,6 +230,7 @@ func (r *storageResource) fill(m *storageModel, s *client.Storage) {
 	m.Name = types.StringValue(s.Name)
 	m.StorageType = types.StringValue(s.StorageType)
 	m.VolumeGb = types.Int64Value(int64(s.VolumeGb))
+	m.Replicated = types.BoolValue(s.Replicated)
 	m.Status = types.StringValue(s.Status)
 	m.Role = types.StringValue(s.Role)
 	m.UserID = types.StringValue(s.UserID)

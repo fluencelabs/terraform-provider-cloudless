@@ -6,6 +6,17 @@ import (
 )
 
 // vpcRecord is the mock's in-memory shape for a VPC.
+// clusterOfVPC returns the cluster a VPC lives on, as the API derives it for
+// subnets and security groups. Unknown VPCs (tests using literal UUIDs) fall
+// back to the draft default cluster so responses stay contract-valid.
+// Caller holds s.mu.
+func (s *Server) clusterOfVPC(vpcID string) string {
+	if v, ok := s.vpcMap[vpcID]; ok && v.ClusterID != "" {
+		return v.ClusterID
+	}
+	return defaultDraftClusterID
+}
+
 type vpcRecord struct {
 	ID, Name, ClusterID, UserID, Status string
 	EnableExternal                      *bool
@@ -67,6 +78,11 @@ func (s *Server) wireVPCs() {
 		w.WriteHeader(http.StatusOK)
 	})
 	s.mux.HandleFunc("/v1/vpcs/", func(w http.ResponseWriter, r *http.Request) {
+		// POST /v1/vpcs/{id}/subnets shares the prefix; hand it to subnets.
+		if p := splitPath(r.URL.Path); len(p) == subnetCreatePathParts && p[3] == "subnets" {
+			s.handleSubnetCreate(w, r)
+			return
+		}
 		// PATCH /v1/vpcs/{id}
 		if r.Method != http.MethodPatch {
 			s.notFound(w, r)

@@ -43,7 +43,7 @@ func (s *Server) handleSGCollection(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createSG(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ClusterID    string          `json:"clusterId"`
+		VPCID        string          `json:"vpcId"`
 		Name         string          `json:"name"`
 		IngressRules json.RawMessage `json:"ingressRules"`
 		EgressRules  json.RawMessage `json:"egressRules"`
@@ -53,7 +53,7 @@ func (s *Server) createSG(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	id := newID()
 	rec := &sgRecord{
-		ID: id, ClusterID: body.ClusterID, Name: body.Name,
+		ID: id, VPCID: body.VPCID, ClusterID: s.clusterOfVPC(body.VPCID), Name: body.Name,
 		UserID: "test-user", Status: "ready",
 		// The real create endpoint takes each direction as an array (or an
 		// absent field), but reads it back as the {type, rules} object. Store

@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -70,11 +71,11 @@ func sgRuleBlock() schema.NestedBlockObject {
 				Validators:  []validator.String{validators.UUID()},
 			},
 			"type": schema.StringAttribute{
-				Optional:      true,
-				Computed:      true,
-				Description:   "Address family: `ipv4` (default) or `ipv6`.",
-				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
-				Validators:    []validator.String{stringvalidator.OneOf("ipv4", "ipv6")},
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString("ipv4"),
+				Description: "Address family: `ipv4` (default) or `ipv6`.",
+				Validators:  []validator.String{stringvalidator.OneOf("ipv4", "ipv6")},
 			},
 		},
 	}
@@ -82,16 +83,21 @@ func sgRuleBlock() schema.NestedBlockObject {
 
 func (r *sgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A security group on a Fluence cluster. Per-direction mode controls how rule blocks are interpreted.",
+		Description: "A security group in a Fluence VPC. Per-direction mode controls how rule blocks are interpreted.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
-			"cluster_id": schema.StringAttribute{
+			"vpc_id": schema.StringAttribute{
 				Required:      true,
+				Description:   "VPC the security group belongs to. The cluster is derived from it.",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 				Validators:    []validator.String{validators.UUID()},
+			},
+			"cluster_id": schema.StringAttribute{
+				Computed:      true,
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"name": schema.StringAttribute{Required: true},
 			"ingress_mode": schema.StringAttribute{
@@ -106,7 +112,6 @@ func (r *sgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 			},
 			"status":  schema.StringAttribute{Computed: true},
 			"user_id": schema.StringAttribute{Computed: true},
-			"vpc_id":  schema.StringAttribute{Computed: true},
 		},
 		Blocks: map[string]schema.Block{
 			"ingress": schema.ListNestedBlock{NestedObject: sgRuleBlock()},
@@ -149,7 +154,7 @@ func (r *sgResource) Create(ctx context.Context, req resource.CreateRequest, res
 	}
 
 	out, err := r.c.CreateSecurityGroup(ctx, client.CreateSecurityGroupRequest{
-		ClusterID:    plan.ClusterID.ValueString(),
+		VPCID:        plan.VPCID.ValueString(),
 		Name:         plan.Name.ValueString(),
 		IngressRules: client.RulesToCreateField(ingress),
 		EgressRules:  client.RulesToCreateField(egress),
