@@ -1,4 +1,5 @@
 .direnv/
+.claude/settings.local.json
 .envrc.local
 .worktrees/
 result
@@ -20,3 +21,6 @@ terraform.rc
 # Local dev builds (terraform dev_overrides)
 .local-bin/
 /terraform-provider-cloudless
+
+# Local secrets (stage API key for acceptance tests); never committed
+.env
