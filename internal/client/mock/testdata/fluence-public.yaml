@@ -102,7 +102,7 @@ info:
   license:
     name: AGPL-3
     identifier: AGPL-3
-  version: 0.11.1
+  version: 0.11.2
 paths:
   /v1/billing/charges/aggregated:
     get:

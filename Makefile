@@ -3,8 +3,10 @@
 GOLANGCI_LINT_VERSION ?= v2.7.1
 
 # Where the vendored public OpenAPI spec is fetched from. The running API
-# serves its own spec (swagger-ui source); stage is ahead of prod.
-OPENAPI_URL ?= https://api.stage.fluence.dev/docs/fluence-public.yaml
+# serves its own spec (swagger-ui source). The contract the provider ships
+# against is production's, so mainnet is the pin; point OPENAPI_URL at stage
+# only to look at something that has not reached production yet.
+OPENAPI_URL ?= https://api.fluence.dev/docs/fluence-public.yaml
 
 # The single quality gate. CI calls exactly this target; never assemble the
 # chain by hand.

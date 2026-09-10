@@ -113,7 +113,7 @@ This provider exists to call one: the **vodopad public API** (`api.fluence.dev`,
 | lint only | `make lint` (config `.golangci.yml`) |
 | format | `make fmt` |
 | docs | `make docs` (tfplugindocs); `make docs-check` fails if `docs/` is stale |
-| refresh vendored spec | `make openapi-refresh` (downloads the spec the stage API serves, normalizes to YAML with `python3` + PyYAML; then fix whatever `make check` reports) |
+| refresh vendored spec | `make openapi-refresh` (downloads the spec the mainnet API serves, normalizes to YAML with `python3` + PyYAML; then fix whatever `make check` reports) |
 
 Call the gate **by name**, never assemble the chain by hand. Delegation roles live in `.claude/agents/` (`reader`, `worker`, `verifier`, `reviewer`); AGENTS.md carries no delegation doctrine beyond this pointer.
 
@@ -133,8 +133,8 @@ Call the gate **by name**, never assemble the chain by hand. Delegation roles li
 - **Wire format comes from the spec, not from memory.** Every new client path or field is added to the mock as well and passes the contract middleware; the contract test skips paths absent from the spec, so an unknown path passes silently — check the path exists in the YAML first.
 - **Test discipline**: unit tests against the mock for every resource (`*_test.go`), contract tests in `internal/client`, acceptance tests (`*_acc_test.go`) gated by `TF_ACC=1`, never run in CI.
 - **Gotchas**:
-  - The vendored spec is fetched from the **running stage API** (`make openapi-refresh`, `OPENAPI_URL` in the Makefile), not from a vodopad checkout: the checked-in YAML in vodopad lags its source and vodopad may not compile locally. The contract middleware **skips** any path absent from the snapshot, so a green mock run only covers paths the snapshot names — refresh before touching a new endpoint.
-  - Stage (0.11.1) is ahead of the public docs: security groups are created by `vpcId` (cluster derived), subnet create rejects `clusterId` (`additionalProperties: false`), moving a draft VM needs `expectedUpdatedAt` echoed verbatim. Assume every stage bump can break a request body; the gate catches it only after `make openapi-refresh`.
+  - The vendored spec is fetched from the **running mainnet API** (`make openapi-refresh`, `OPENAPI_URL` in the Makefile), not from a vodopad checkout: the checked-in YAML in vodopad lags its source and vodopad may not compile locally. Mainnet is the pin because production's contract is the one the provider ships against; point `OPENAPI_URL` at stage only to look at something that has not reached production yet, and never commit a stage-only snapshot. The contract middleware **skips** any path absent from the snapshot, so a green mock run only covers paths the snapshot names — refresh before touching a new endpoint.
+  - The live API (0.11.2, mainnet and stage alike) is ahead of the public docs: security groups are created by `vpcId` (cluster derived), subnet create rejects `clusterId` (`additionalProperties: false`), moving a draft VM needs `expectedUpdatedAt` echoed verbatim. Assume every API bump can break a request body; the gate catches it only after `make openapi-refresh`.
   - Catalog lists (`/v1/clusters`, `/v1/datacenters`, `/v1/configurations/virtual_machines`, `/v1/storages/default_images`) come wrapped as `{"items": […]}`; the mock contract test GETs them so an envelope change fails offline, not on stage.
   - Acceptance tests pick the first cluster the account sees (`data.cloudless_clusters.all.clusters[0]`), never a hard-coded region: the stage account has one cluster in LT.
   - Stage authenticates only by the `X-API-KEY` header; `Authorization: X-API-KEY …` alone is rejected. The client sends both, keep it that way.
