@@ -35,7 +35,7 @@ test-acc:
 	TF_ACC=1 go test ./internal/provider/ -run 'TestAcc' -count=1 -timeout 30m
 
 docs:
-	tfplugindocs generate --provider-name cloudless
+	go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs generate --provider-name cloudless
 
 fmt:
 	go fmt ./...
