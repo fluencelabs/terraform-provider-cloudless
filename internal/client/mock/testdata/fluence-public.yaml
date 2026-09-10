@@ -1,0 +1,6149 @@
+openapi: 3.1.0
+info:
+  title: Fluence API
+  description: "# Introduction\n\nThe Fluence API gives programmatic access to the decentralized Fluence compute marketplace, letting you find, rent, and\nmanage compute resources without the web UI. Integrate Fluence directly into your applications and automated workflows.\n\nBase URL: `https://api.fluence.dev`\n\nThe documentation starts with a high-level overview of design and technology, followed by endpoint reference details.\nFor additional user guides, see the [Fluence Documentation](https://fluence.dev/docs/build/overview).\n\n## Requests\n\nSend HTTPS requests to the Fluence API. All request and response bodies are JSON.\n\n- Set `Content-Type: application/json` for POST, PUT, and PATCH calls.\n- All examples assume the default `Accept: application/json` header.\n\n### Example\n\n```bash\ncurl -X POST https://api.fluence.dev/v1/public_ips \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Authorization: X-API-KEY <YOUR_API_KEY>\" \\\n  -d '{\n        \"addressType\": \"V4\",\n        \"clusterId\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\",\n        \"name\": \"my-public-ip\"\n      }'\n```\n\n### HTTP request methods\n\nThe interface responds to different methods depending on the action required.\n\n| Method | Description                                                                                        |\n|--------|----------------------------------------------------------------------------------------------------|\n| GET    | Retrieves resource information. These requests are read-only and won't modify any resources.       |\n| POST   | Usually used to create new resources. Include all required attributes in the request body as JSON. |\n| PATCH  | Update specific attributes of a resource.                                                          |\n| PUT    | Updates an entire resource by replacing it with the provided data, regardless of current values.   |\n| DELETE | Removes resources.                                                                                 |\n\n## Responses\n\nSuccessful requests return `2xx` status codes and a JSON object.   \n\nIf an error occurs, Fluence returns an `4xx` or `5xx` status code and a JSON object describing the problem.\n\n### Response codes\n\n| Code | Description                                                                    |\n|------|--------------------------------------------------------------------------------|\n| 2xx  | **Success** - The request was successfully received, understood, and processed |\n| 4xx  | **Client Error** - The request contains invalid syntax or cannot be fulfilled  |\n| 400  | Bad request - Invalid parameters or malformed JSON                             |\n| 401  | Unauthorized - API key missing or invalid                                      |\n| 403  | Forbidden - Authenticated but not allowed                                      |\n| 404  | Not found - Resource does not exist                                            |\n| 422  | Unprocessable Entity - Well-formed request but cannot be processed             |\n| 500  | Internal server error - Unexpected error on our side.                          |\n\n### Error Response Format\n\nWhen an error occurs, the response includes a status message and a body in JSON format with an `error` field with\nadditional information. For example:\n\n```bash\n    HTTP/1.1 403 Forbidden\n    {\n      \"error\": \"Auth failed. No such API Key\",\n    }\n```\n\n## Authentication\n\nAll endpoints require a jwt token supplied as a Bearer token in the `Authorization` header or an API key provided as the value of the `X-API-KEY` header. For example:\n\n```bash\ncurl -H 'Authorization: Bearer my_authentication_token'\n```\n\n```bash\ncurl -H 'Authorization: X-API-KEY my_api_key'\n```\n\n### Managing API Keys\n\nCreate and manage keys in\nthe [Fluence Console › Settings › API Keys](https://console.fluence.network/settings/api-keys).\n\n- **Read-only keys** – retrieve information only\n- **Full-access keys** – manage all resources\n\n> **Important**: API keys are only displayed once during creation for security reasons. Store them safely - if a key is\n> lost, expired or compromised, you'll need to delete it and create a new one.\n\n### Key Security\n\nAPI keys function as complete authentication credentials, similar to a username/password combination. Therefore:\n\n- Keep your keys secure and never share them\n- Use HTTPS for all API requests\n- Rotate keys periodically\n- Set appropriate expiration dates when creating keys\n- Delete compromised keys immediately\n"
+  contact:
+    name: Cloudless Labs
+  license:
+    name: AGPL-3
+    identifier: AGPL-3
+  version: 0.8.210
+paths:
+  /v1/billing/charges/aggregated:
+    get:
+      tags:
+      - Billing
+      operationId: get_aggregated_charges
+      parameters:
+      - name: resourceId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ResourceId'
+      - name: resourceType
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ResourceTypeDto'
+      - name: startDate
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: endDate
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: format
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ResponseOutputFormat'
+      responses:
+        '200':
+          description: Aggregated charges
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TotalChargesEntry'
+            text/csv:
+              schema:
+                type: string
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token: []
+      - api_key:
+        - billing:get_spending_history
+  /v1/billing/charges/total:
+    get:
+      tags:
+      - Billing
+      operationId: get_total_charges
+      parameters:
+      - name: resourceId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ResourceId'
+      - name: resourceType
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ResourceTypeDto'
+      - name: startDate
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date
+      - name: endDate
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TotalChargesResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token: []
+      - api_key:
+        - billing:get_spending_history
+  /v1/billing/top_up:
+    post:
+      tags:
+      - Billing
+      operationId: Create top-up request
+      requestBody:
+        description: Create a new top-up request
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TopUpRequest'
+        required: true
+      responses:
+        '200':
+          description: Top-up request processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopUpDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token: []
+      - api_key:
+        - billing:top_up
+  /v1/billing/top_up/pending:
+    get:
+      tags:
+      - Billing
+      operationId: Get pending top-up
+      responses:
+        '200':
+          description: Get pending top-up request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingTopUpResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token: []
+      - api_key:
+        - billing:get_history
+  /v1/clusters:
+    get:
+      tags:
+      - Hardware
+      operationId: Get available clusters
+      responses:
+        '200':
+          description: List of available clusters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ClusterDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - clusters:read
+      - api_key:
+        - clusters:read
+  /v1/clusters/{cluster_id}/resources:
+    get:
+      tags:
+      - Hardware
+      operationId: get_available_resources
+      parameters:
+      - name: cluster_id
+        in: path
+        description: Cluster ID
+        required: true
+        schema:
+          $ref: '#/components/schemas/ClusterId'
+      responses:
+        '200':
+          description: List of available resources in cluster
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterResourcesDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - clusters:read
+      - api_key:
+        - clusters:read
+  /v1/configurations/virtual_machines:
+    get:
+      tags:
+      - Hardware
+      operationId: get_vm_configurations
+      responses:
+        '200':
+          description: List of available vm configurations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VmConfigurationDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vm:list
+      - api_key:
+        - vm:list
+  /v1/datacenters:
+    get:
+      tags:
+      - Hardware
+      description: Get a list of datacenters
+      operationId: get_datacenters
+      responses:
+        '200':
+          description: List Of Datacenters
+          headers:
+            Authorization:
+              schema:
+                type: string
+              description: API Key
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DatacenterDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - clusters:read
+      - api_key:
+        - clusters:read
+  /v1/prices/cost:
+    post:
+      tags:
+      - Prices
+      operationId: cost
+      requestBody:
+        description: Resources to calculate cost
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CostRequest'
+        required: true
+      responses:
+        '200':
+          description: Cost of resources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CostResult'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - prices:read
+      - api_key:
+        - prices:read
+  /v1/prices/public-ip:
+    get:
+      tags:
+      - Prices
+      operationId: get_public_ip_prices
+      parameters:
+      - name: clusterId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ClusterId'
+      responses:
+        '200':
+          description: VM prices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PublicIpePriceInfoDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - prices:read
+      - api_key:
+        - prices:read
+  /v1/prices/storage:
+    get:
+      tags:
+      - Prices
+      operationId: get_storage_prices
+      parameters:
+      - name: clusterId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ClusterId'
+      responses:
+        '200':
+          description: Storage prices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StoragePriceInfoDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - prices:read
+      - api_key:
+        - prices:read
+  /v1/prices/vm:
+    get:
+      tags:
+      - Prices
+      operationId: get_vm_prices
+      parameters:
+      - name: clusterId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ClusterId'
+      responses:
+        '200':
+          description: VM prices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VmPriceInfoDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - prices:read
+      - api_key:
+        - prices:read
+  /v1/public_ips:
+    get:
+      tags:
+      - PublicIP
+      operationId: get_users_public_ips
+      parameters:
+      - name: ids
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserPublicIpId'
+      - name: clusterId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ClusterId'
+      - name: name
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UserPublicIpStatusDto'
+      - name: addressType
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/IpAddressType'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse_UserPublicIpDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - public_ip:read
+      - api_key:
+        - public_ip:read
+    post:
+      tags:
+      - PublicIP
+      operationId: create_users_public_ip
+      requestBody:
+        description: Create a new user public IP
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserPublicIdRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPublicIpDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - public_ip:write
+      - api_key:
+        - public_ip:write
+  /v1/public_ips/delete:
+    post:
+      tags:
+      - PublicIP
+      operationId: delete_users_public_ips
+      requestBody:
+        description: Public IPs ids to remove
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserPublicIpIdsDto'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserPublicIpDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - public_ip:write
+      - api_key:
+        - public_ip:write
+  /v1/public_ips/{public_ip_id}:
+    patch:
+      tags:
+      - PublicIP
+      operationId: update_user_public_ip
+      parameters:
+      - name: public_ip_id
+        in: path
+        description: The ID of the address to update
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: Update an existing user public ip
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserPublicIpRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPublicIpDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - public_ip:write
+      - api_key:
+        - public_ip:write
+  /v1/security_groups:
+    get:
+      tags:
+      - SecurityGroup
+      operationId: get_user_security_groups
+      parameters:
+      - name: ids
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSecurityGroupId'
+      - name: clusterId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ClusterId'
+      - name: vpcId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UserVpcId'
+      - name: name
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UserSecurityGroupStatusDto'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse_UserSecurityGroupDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - security_group:read
+      - api_key:
+        - security_group:read
+    post:
+      tags:
+      - SecurityGroup
+      operationId: create_user_security_group
+      requestBody:
+        description: Create a new user security group
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserSecurityGroupRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSecurityGroupDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - security_group:write
+      - api_key:
+        - security_group:write
+  /v1/security_groups/delete:
+    post:
+      tags:
+      - SecurityGroup
+      operationId: delete_user_security_groups
+      requestBody:
+        description: Security group IDs to remove
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSecurityGroupIdsDto'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserSecurityGroupDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - security_group:write
+      - api_key:
+        - security_group:write
+  /v1/security_groups/{security_group_id}:
+    patch:
+      tags:
+      - SecurityGroup
+      operationId: update_user_security_group
+      parameters:
+      - name: security_group_id
+        in: path
+        description: The ID of the security group to update
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: Update an existing user security group
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserSecurityGroupRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSecurityGroupDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - security_group:write
+      - api_key:
+        - security_group:write
+  /v1/service/status:
+    get:
+      tags:
+      - Service
+      operationId: get_service_status
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceStatusDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security: []
+  /v1/ssh_keys:
+    get:
+      tags:
+      - SSH keys
+      operationId: get_users_ssh_keys
+      parameters:
+      - name: ids
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSshKeyId'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse_UserSshKeyDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - ssh_key:list
+    post:
+      tags:
+      - SSH keys
+      operationId: create_users_ssh_key
+      requestBody:
+        description: Create a new user Ssh key
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserSshKeyRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSshKeyDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - ssh_key:create
+  /v1/ssh_keys/delete:
+    post:
+      tags:
+      - SSH keys
+      operationId: delete_users_ssh_keys
+      requestBody:
+        description: Ssh keys ids to remove
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSshKeyIdsDto'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserSshKeyDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - ssh_key:remove
+  /v1/storages:
+    get:
+      tags:
+      - Storage
+      operationId: get_users_storages
+      parameters:
+      - name: ids
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserStorageId'
+      - name: name
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: storageType
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/StorageType'
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UserStorageStatusDto'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse_UserStorageDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - storage:read
+      - api_key:
+        - storage:read
+    post:
+      tags:
+      - Storage
+      operationId: create_users_storage
+      requestBody:
+        description: Create a new user storage
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserStorageRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserStorageDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - storage:write
+      - api_key:
+        - storage:write
+  /v1/storages/default_images:
+    get:
+      tags:
+      - Storage
+      operationId: get_default_images
+      responses:
+        '200':
+          description: List of default OS images
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DefaultImageDto'
+  /v1/storages/delete:
+    post:
+      tags:
+      - Storage
+      operationId: delete_users_storages
+      requestBody:
+        description: Storages ids to remove
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserStorageIdsDto'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserStorageDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - storage:write
+      - api_key:
+        - storage:write
+  /v1/storages/types:
+    get:
+      tags:
+      - Storage
+      operationId: get_storage_types
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StorageTypeInfoDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - storage:read
+      - api_key:
+        - storage:read
+  /v1/storages/{storage_id}:
+    patch:
+      tags:
+      - Storage
+      operationId: update_users_storage
+      parameters:
+      - name: storage_id
+        in: path
+        description: The ID of the user storage to update
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: Update an existing user storage
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserStorageRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserStorageDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - storage:write
+      - api_key:
+        - storage:write
+  /v1/subnets:
+    get:
+      tags:
+      - Subnets
+      operationId: get_users_subnets
+      parameters:
+      - name: ids
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSubnetId'
+      - name: name
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UserSubnetStatusDto'
+      - name: vpcId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UserVpcId'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse_UserSubnetDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - subnet:read
+  /v1/subnets/delete:
+    post:
+      tags:
+      - Subnets
+      operationId: delete_users_subnets
+      requestBody:
+        description: Subnets ids to remove
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSubnetIdsDto'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserSubnetDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - subnet:write
+  /v1/subnets/{subnet_id}:
+    patch:
+      tags:
+      - Subnets
+      operationId: update_user_subnet
+      parameters:
+      - name: subnet_id
+        in: path
+        description: The ID of the subnet to update
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: Update an existing user subnet
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserSubnetRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSubnetDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - subnet:write
+  /v1/users/balances/refresh:
+    post:
+      tags:
+      - Users
+      operationId: refresh_user_balance
+      responses:
+        '200':
+          description: User entitlement value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntitlementValueDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token: []
+      - api_key:
+        - ''
+  /v1/users/me:
+    get:
+      tags:
+      - Users
+      operationId: Get current user info
+      responses:
+        '200':
+          description: User information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserWithScopesDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token: []
+      - api_key:
+        - ''
+  /v1/users/me/profile:
+    get:
+      tags:
+      - Users
+      operationId: Get current user profile
+      responses:
+        '200':
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token: []
+      - api_key:
+        - ''
+    patch:
+      tags:
+      - Users
+      operationId: Update current user profile
+      requestBody:
+        description: Patch current user profile
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserProfileRequest'
+            example:
+              company: Cloudless
+              firstName: Igor
+              jobRole: Designer
+              lastName: Ten
+        required: true
+      responses:
+        '200':
+          description: Updated current user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token: []
+      - api_key:
+        - ''
+  /v1/vpc/{vpc_id}/subnets:
+    post:
+      tags:
+      - Subnets
+      operationId: create_users_subnet
+      parameters:
+      - name: vpc_id
+        in: path
+        description: VPC id
+        required: true
+        schema:
+          $ref: '#/components/schemas/UserVpcId'
+      requestBody:
+        description: Create a new user Subnet
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserSubnetRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSubnetDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - subnet:write
+  /v1/vpcs:
+    get:
+      tags:
+      - VPCs
+      operationId: get_users_vpcs
+      parameters:
+      - name: ids
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserVpcId'
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UserVpcStatusDto'
+      - name: clusterId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ClusterId'
+      - name: name
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse_UserVpcDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vpc:read
+      - api_key:
+        - vpc:read
+    post:
+      tags:
+      - VPCs
+      operationId: create_users_vpc
+      requestBody:
+        description: Create a new user VPC
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserVpcRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVpcDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vpc:write
+      - api_key:
+        - vpc:write
+  /v1/vpcs/delete:
+    post:
+      tags:
+      - VPCs
+      operationId: delete_users_vpcs
+      requestBody:
+        description: VPCs ids to remove
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserVpcIdsDto'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserVpcDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vpc:write
+      - api_key:
+        - vpc:write
+  /v1/vpcs/{vpc_id}:
+    patch:
+      tags:
+      - VPCs
+      operationId: update_user_vpc
+      parameters:
+      - name: vpc_id
+        in: path
+        description: The ID of the vpc to update
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: Update an existing user vpc
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserVpcRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVpcDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vpc:write
+      - api_key:
+        - vpc:write
+  /v2/billing/get_history:
+    get:
+      tags:
+      - Billing
+      operationId: get_top_up_history_v2
+      parameters:
+      - name: start
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: end
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/TopUpStatusDTO'
+      - name: minAmount
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: maxAmount
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      responses:
+        '200':
+          description: Get billing history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse_TopUpDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token: []
+      - api_key:
+        - billing:get_history
+  /v2/users/balances:
+    get:
+      tags:
+      - Users
+      operationId: get_user_balance_v2
+      responses:
+        '200':
+          description: User entitlement value
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EntitlementValueDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token: []
+      - api_key:
+        - ''
+  /v2/vms:
+    get:
+      tags:
+      - VMs
+      operationId: get_users_vms
+      parameters:
+      - name: ids
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserVmId'
+      - name: name
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UserVmStatusDto'
+      - name: clusterId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ClusterId'
+      - name: publicIpId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UserPublicIpId'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      - name: per_page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse_UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:read
+      - api_key:
+        - vms:read
+    post:
+      tags:
+      - VMs
+      operationId: create_users_vm
+      requestBody:
+        description: Create a new user VM
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserVmRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
+  /v2/vms/{vm_id}:
+    patch:
+      tags:
+      - VMs
+      operationId: update_users_vm
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user vm to update
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: Update an existing user vm
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserVmRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
+  /v2/vms/{vm_id}/interfaces:
+    get:
+      tags:
+      - VMs
+      operationId: get_vm_interfaces
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user vm to get interfaces for
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VmNetworkInterfaceDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:read
+      - api_key:
+        - vms:read
+  /v2/vms/{vm_id}/interfaces/{interface_id}:
+    patch:
+      tags:
+      - VMs
+      operationId: update_network_interface
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user vm to add storages to
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: interface_id
+        in: path
+        description: The ID of the network interface to assign security group to
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: Update network interface of user vm
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNetworkInterfaceRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
+  /v2/vms/{vm_id}/public_ip/add:
+    post:
+      tags:
+      - VMs
+      operationId: add_public_ip
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user vm to add public ip
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: Add public ip to user vm
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPublicIpRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
+  /v2/vms/{vm_id}/public_ip/remove:
+    post:
+      tags:
+      - VMs
+      operationId: remove_public_ip
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user vm to remove public ip from
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
+  /v2/vms/{vm_id}/restart:
+    post:
+      tags:
+      - VMs
+      operationId: restart_users_vm
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user vm to restart
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
+  /v2/vms/{vm_id}/softreboot:
+    post:
+      tags:
+      - VMs
+      operationId: softreboot_users_vm
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user vm to softreboot
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
+  /v2/vms/{vm_id}/storages/add:
+    post:
+      tags:
+      - VMs
+      operationId: add_storages
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user vm to add storages to
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: Add storages to user vm
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddStoragesRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
+  /v2/vms/{vm_id}/storages/remove:
+    post:
+      tags:
+      - VMs
+      operationId: remove_storages
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user vm to remove storages from
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: Remove storages from user vm
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoveStoragesRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
+  /v2/vms/{vm_id}/terminate:
+    post:
+      tags:
+      - VMs
+      operationId: terminate_users_vm
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user vm to terminate
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Not allowed to call this endpoint
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
+components:
+  schemas:
+    AddPublicIpRequest:
+      type: object
+      required:
+      - publicIpId
+      properties:
+        publicIpId:
+          $ref: '#/components/schemas/UserPublicIpId'
+    AddStoragesRequest:
+      type: object
+      required:
+      - dataDisks
+      properties:
+        dataDisks:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserStorageId'
+    AvailableStorageDto:
+      type: object
+      required:
+      - storageType
+      - replicated
+      - volumeGb
+      properties:
+        replicated:
+          type: boolean
+        storageType:
+          $ref: '#/components/schemas/StorageTypeDto'
+        volumeGb:
+          type: integer
+          format: u-int64
+          example: '100'
+          minimum: 0
+    ClusterDto:
+      type: object
+      required:
+      - id
+      - name
+      - dc_id
+      properties:
+        dc_id:
+          type: string
+          example: 92e6ed24-8bfa-4737-9409-a1aac994e1f5
+        id:
+          type: string
+          example: 92e6ed24-8bfa-4737-9409-a1aac994e1f5
+        name:
+          type: string
+          example: Cloudless
+    ClusterId:
+      type: string
+      format: uuid
+    ClusterResourcesDto:
+      type: object
+      required:
+      - availablePublicIps
+      - availableStorage
+      - availableConfigurations
+      properties:
+        availableConfigurations:
+          type: array
+          items:
+            $ref: '#/components/schemas/VmConfigurationDto'
+        availablePublicIps:
+          type: object
+          additionalProperties:
+            type: integer
+            format: u-int16
+            minimum: 0
+          propertyNames:
+            type: string
+            enum:
+            - V4
+            - V6
+          example:
+            V4:
+              $serde_json::private::Number: '10'
+            V6:
+              $serde_json::private::Number: '150'
+        availableStorage:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/AvailableStorageDto'
+          propertyNames:
+            type: string
+            enum:
+            - AMD_ZEN2
+            - AMD_ZEN3
+            - AMD_ZEN5
+          example:
+            AMD_ZEN3:
+            - replicated: true
+              storageType: NVME
+              volumeGb:
+                $serde_json::private::Number: '100'
+            - replicated: false
+              storageType: NVME
+              volumeGb:
+                $serde_json::private::Number: '200'
+    CostRequest:
+      type: object
+      required:
+      - resources
+      properties:
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/PricingResourceTypeDto'
+        secs:
+          type:
+          - integer
+          - 'null'
+          format: u-int64
+          minimum: 0
+    CostResult:
+      type: object
+      required:
+      - costOfResources
+      - totalCostPerSec
+      - periodSecs
+      - totalCost
+      properties:
+        costOfResources:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceCostDto'
+        periodSecs:
+          type: integer
+          format: u-int64
+          minimum: 0
+        totalCost:
+          type: string
+          example: '0.1'
+        totalCostPerSec:
+          type: string
+          example: '0.01'
+    CpuFamilyDto:
+      type: string
+      enum:
+      - AMD_ZEN2
+      - AMD_ZEN3
+      - AMD_ZEN5
+    CreateUserPublicIdRequest:
+      type: object
+      required:
+      - clusterId
+      - name
+      - addressType
+      properties:
+        addressType:
+          $ref: '#/components/schemas/NewIpAddressType'
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        name:
+          type: string
+    CreateUserSecurityGroupRequest:
+      type: object
+      required:
+      - clusterId
+      - name
+      properties:
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        egressRules:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/SecurityGroupRuleDto'
+        ingressRules:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/SecurityGroupRuleDto'
+        name:
+          type: string
+    CreateUserSshKeyRequest:
+      type: object
+      required:
+      - publicKey
+      - name
+      properties:
+        name:
+          type: string
+          description: A human-readable display name for this key, used to easily identify the SSH keys when they are displayed.
+          example: my-key
+        publicKey:
+          type: string
+          description: |-
+            The public key in OpenSSH format. Supported algorithms are:
+            - ECDSA (nistp256, nistp384, nistp521)
+            - RSA
+            - ED25519
+          example: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKgJIjnDg1DjqOOxINs78oU3f7PJXIyq9uiNocNVhXNx user@example.com
+    CreateUserStorageRequest:
+      type: object
+      required:
+      - clusterId
+      - name
+      - storageType
+      - volumeGb
+      - replicated
+      properties:
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        name:
+          type: string
+        osImage:
+          type:
+          - string
+          - 'null'
+          example: https://example.com/image.qcow2
+        replicated:
+          type: boolean
+        storageType:
+          $ref: '#/components/schemas/NewStorageType'
+        volumeGb:
+          type: integer
+          format: u-int32
+          minimum: 0
+    CreateUserSubnetRequest:
+      type: object
+      required:
+      - clusterId
+      - name
+      properties:
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        ipv4Cidr:
+          type:
+          - string
+          - 'null'
+          example: 10.0.0.0/24
+        ipv6Cidr:
+          type:
+          - string
+          - 'null'
+          example: 2001:db8::/64
+        name:
+          type: string
+    CreateUserVmRequest:
+      type: object
+      required:
+      - clusterId
+      - name
+      - configurationId
+      - bootDisk
+      properties:
+        bootDisk:
+          $ref: '#/components/schemas/VmBootDisk'
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        configurationId:
+          $ref: '#/components/schemas/VmConfigurationId'
+        dataDisks:
+          type: array
+          items:
+            $ref: '#/components/schemas/VmDataDisk'
+        name:
+          type: string
+        publicIp:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/VmPublicIp'
+        sshKeys:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSshKeyId'
+    CreateUserVpcRequest:
+      type: object
+      required:
+      - clusterId
+      - name
+      properties:
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        enableExternal:
+          type:
+          - boolean
+          - 'null'
+        name:
+          type: string
+    Currency:
+      type: string
+      enum:
+      - usdc
+      - usdt
+    DatacenterDto:
+      type: object
+      required:
+      - id
+      - countryCode
+      - cityCode
+      - index
+      - tier
+      - certifications
+      - slug
+      properties:
+        certifications:
+          type: array
+          items:
+            type: string
+        cityCode:
+          type: string
+        countryCode:
+          type: string
+        id:
+          $ref: '#/components/schemas/DatacenterId'
+        index:
+          type: integer
+          format: int32
+        slug:
+          type: string
+        tier:
+          type: integer
+          format: int32
+    DatacenterId:
+      type: string
+      format: uuid
+    DefaultImageDto:
+      type: object
+      required:
+      - id
+      - name
+      - distribution
+      - slug
+      - downloadUrl
+      - iconUrl
+      - username
+      - createdAt
+      - updatedAt
+      properties:
+        createdAt:
+          type: string
+          example: 2024-01-01T00:00:000000Z
+        distribution:
+          type: string
+          example: Ubuntu
+        downloadUrl:
+          type: string
+          example: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+        iconUrl:
+          type: string
+          example: https://f2nrfq3ufzjj08qq.public.blob.vercel-storage.com/images_icons/ubuntu-icon-fvmHzDIRMkyrxr21oEBTo0IV0emlv5.svg
+        id:
+          type: string
+          example: da1e99153be74618820a164eebcbdc66
+        name:
+          type: string
+          example: 24.04 (LTS) x64
+        slug:
+          type: string
+          example: ubuntu-24-04-x64
+        updatedAt:
+          type: string
+          example: 2024-01-01T00:00:000000Z
+        username:
+          type: string
+          example: ubuntu
+    EntitlementValueDto:
+      type: object
+      required:
+      - balance
+      - usage
+      - estimatedUsage
+      - overage
+      - totalDepositedAmount
+      - userId
+      - featureKey
+      properties:
+        balance:
+          type: string
+          example: '100.50'
+        estimatedUsage:
+          type: string
+          example: '100.50'
+        featureKey:
+          type: string
+        overage:
+          type: string
+          example: '100.50'
+        totalDepositedAmount:
+          type: string
+          example: '100.50'
+        usage:
+          type: string
+          example: '100.50'
+        usageDaysLeft:
+          type:
+          - integer
+          - 'null'
+          format: u-int16
+          minimum: 0
+        userId:
+          type: string
+          example: 9ba32273-49e6-4655-b193-b29f61752c2f
+    ErrorBody:
+      type: object
+      description: it may be useful to add id for unique error identification
+      required:
+      - error
+      properties:
+        error:
+          type: string
+          description: The error message
+    IpAddressType:
+      type: string
+      enum:
+      - V4
+      - V6
+    NetworkInterfaceKindDto:
+      oneOf:
+      - type: object
+        required:
+        - private
+        properties:
+          private:
+            type: object
+            required:
+            - subnet
+            properties:
+              subnet:
+                $ref: '#/components/schemas/UserSubnetId'
+      - type: object
+        required:
+        - public
+        properties:
+          public:
+            type: object
+            required:
+            - public_ip
+            properties:
+              public_ip:
+                $ref: '#/components/schemas/UserPublicIpId'
+    NewIpAddressType:
+      type: string
+      enum:
+      - V4
+    NewStorageType:
+      type: string
+      enum:
+      - NVME
+    PaginatedResponse_TopUpDto:
+      type: object
+      required:
+      - items
+      - pagination
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - userId
+            - currency
+            - amount
+            - copperxFee
+            - copperxGasFee
+            - status
+            - createdAt
+            - updatedAt
+            properties:
+              amount:
+                type: integer
+                format: u-int64
+                minimum: 0
+              balanceContractTxAddress:
+                type:
+                - string
+                - 'null'
+              copperxFee:
+                type: integer
+                format: u-int64
+                minimum: 0
+              copperxGasFee:
+                type: integer
+                format: u-int64
+                minimum: 0
+              copperxSessionId:
+                type:
+                - string
+                - 'null'
+              copperxSessionUrl:
+                type:
+                - string
+                - 'null'
+              createdAt:
+                type: string
+                example: 2024-01-01T00:00:000000Z
+              currency:
+                $ref: '#/components/schemas/Currency'
+              id:
+                $ref: '#/components/schemas/TopUpId'
+              status:
+                $ref: '#/components/schemas/TopUpStatusDTO'
+              updatedAt:
+                type: string
+                example: 2024-01-01T00:00:000000Z
+              userId:
+                $ref: '#/components/schemas/UserId'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+    PaginatedResponse_UserPublicIpDto:
+      type: object
+      required:
+      - items
+      - pagination
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - userId
+            - clusterId
+            - name
+            - addressType
+            - status
+            - createdAt
+            properties:
+              address:
+                type:
+                - string
+                - 'null'
+              addressType:
+                $ref: '#/components/schemas/IpAddressType'
+              attachedTo:
+                oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/UserVmId'
+              clusterId:
+                $ref: '#/components/schemas/ClusterId'
+              createdAt:
+                type: string
+                format: date-time
+              id:
+                $ref: '#/components/schemas/UserPublicIpId'
+              lastPaidAt:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              name:
+                type: string
+              paidUntil:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              readySince:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              removedAt:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              status:
+                $ref: '#/components/schemas/UserPublicIpStatusDto'
+              userId:
+                $ref: '#/components/schemas/UserId'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+    PaginatedResponse_UserSecurityGroupDto:
+      type: object
+      required:
+      - items
+      - pagination
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - userId
+            - clusterId
+            - vpcId
+            - name
+            - status
+            - ingressRules
+            - egressRules
+            - createdAt
+            - attachedTo
+            properties:
+              attachedTo:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserVmNetworkInterfaceId'
+              clusterId:
+                $ref: '#/components/schemas/ClusterId'
+              createdAt:
+                type: string
+                format: date-time
+              egressRules:
+                $ref: '#/components/schemas/SecurityGroupRulesDto'
+              id:
+                $ref: '#/components/schemas/UserSecurityGroupId'
+              ingressRules:
+                $ref: '#/components/schemas/SecurityGroupRulesDto'
+              name:
+                type: string
+              readySince:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              removedAt:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              status:
+                $ref: '#/components/schemas/UserSecurityGroupStatusDto'
+              userId:
+                $ref: '#/components/schemas/UserId'
+              vpcId:
+                $ref: '#/components/schemas/UserVpcId'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+    PaginatedResponse_UserSshKeyDto:
+      type: object
+      required:
+      - items
+      - pagination
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - userId
+            - name
+            - publicKey
+            - algorithm
+            - fingerprint
+            properties:
+              algorithm:
+                type: string
+              fingerprint:
+                type: string
+              id:
+                $ref: '#/components/schemas/UserSshKeyId'
+              name:
+                type: string
+              publicKey:
+                type: string
+              userId:
+                $ref: '#/components/schemas/UserId'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+    PaginatedResponse_UserStorageDto:
+      type: object
+      required:
+      - items
+      - pagination
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - userId
+            - clusterId
+            - name
+            - storageType
+            - status
+            - role
+            - volumeGb
+            - attachedTo
+            - createdAt
+            properties:
+              attachedTo:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserVmId'
+              clusterId:
+                $ref: '#/components/schemas/ClusterId'
+              createdAt:
+                type: string
+                format: date-time
+              id:
+                $ref: '#/components/schemas/UserStorageId'
+              initUrl:
+                type:
+                - string
+                - 'null'
+              lastPaidAt:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              name:
+                type: string
+              paidUntil:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              readySince:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              removedAt:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              role:
+                $ref: '#/components/schemas/StorageRoleDto'
+              status:
+                $ref: '#/components/schemas/UserStorageStatusDto'
+              storageType:
+                $ref: '#/components/schemas/StorageTypeDto'
+              userId:
+                $ref: '#/components/schemas/UserId'
+              volumeGb:
+                type: integer
+                format: u-int64
+                minimum: 0
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+    PaginatedResponse_UserSubnetDto:
+      type: object
+      required:
+      - items
+      - pagination
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - userId
+            - clusterId
+            - vpcId
+            - name
+            - status
+            properties:
+              clusterId:
+                $ref: '#/components/schemas/ClusterId'
+              id:
+                $ref: '#/components/schemas/UserSubnetId'
+              ipv4Cidr:
+                type:
+                - string
+                - 'null'
+                example: 10.0.0.0/24
+              ipv6Cidr:
+                type:
+                - string
+                - 'null'
+                example: 2001:db8::/64
+              name:
+                type: string
+              readySince:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              removedAt:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              status:
+                $ref: '#/components/schemas/UserSubnetStatusDto'
+              userId:
+                $ref: '#/components/schemas/UserId'
+              vpcId:
+                $ref: '#/components/schemas/UserVpcId'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+    PaginatedResponse_UserVmDto:
+      type: object
+      required:
+      - items
+      - pagination
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - userId
+            - clusterId
+            - configurationId
+            - name
+            - status
+            - restartRequired
+            - dataDisks
+            - subnets
+            - sshKeys
+            - networkInterfaces
+            - createdAt
+            - updatedAt
+            properties:
+              bootDisk:
+                oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/UserStorageId'
+              clusterId:
+                $ref: '#/components/schemas/ClusterId'
+              configurationId:
+                $ref: '#/components/schemas/VmConfigurationId'
+              createdAt:
+                type: string
+                format: date-time
+              dataDisks:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserStorageId'
+              id:
+                $ref: '#/components/schemas/UserVmId'
+              lastPaidAt:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              name:
+                type: string
+              networkInterfaces:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserVmNetworkInterfaceId'
+              paidUntil:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              publicIp:
+                oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/UserPublicIpId'
+              readySince:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              restartRequired:
+                type: boolean
+              sshKeys:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserSshKeyId'
+              status:
+                $ref: '#/components/schemas/UserVmStatusDto'
+              subnets:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserSubnetId'
+              terminatedAt:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              updatedAt:
+                type: string
+                format: date-time
+              userId:
+                $ref: '#/components/schemas/UserId'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+    PaginatedResponse_UserVpcDto:
+      type: object
+      required:
+      - items
+      - pagination
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+            - id
+            - userId
+            - clusterId
+            - name
+            - status
+            - subnetsCount
+            - createdAt
+            properties:
+              clusterId:
+                $ref: '#/components/schemas/ClusterId'
+              createdAt:
+                type: string
+                format: date-time
+              enableExternal:
+                type:
+                - boolean
+                - 'null'
+              id:
+                $ref: '#/components/schemas/UserVpcId'
+              name:
+                type: string
+              readySince:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              removedAt:
+                type:
+                - string
+                - 'null'
+                format: date-time
+              status:
+                $ref: '#/components/schemas/UserVpcStatusDto'
+              subnetsCount:
+                type: integer
+                format: u-int32
+                minimum: 0
+              userId:
+                $ref: '#/components/schemas/UserId'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+    PaginationInfo:
+      type: object
+      required:
+      - totalRecords
+      - filteredRecords
+      - totalPages
+      - currentPage
+      - perPage
+      properties:
+        currentPage:
+          type: integer
+          format: u-int64
+          minimum: 0
+        filteredRecords:
+          type: integer
+          format: u-int64
+          minimum: 0
+        perPage:
+          type: integer
+          format: u-int64
+          minimum: 0
+        totalPages:
+          type: integer
+          format: u-int32
+          minimum: 0
+        totalRecords:
+          type: integer
+          format: u-int64
+          minimum: 0
+    PendingTopUpResponse:
+      type: object
+      properties:
+        pendingTopUp:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TopUpDto'
+    PermissionScope:
+      type: string
+      enum:
+      - vm:create
+      - vm:remove
+      - vm:restart
+      - vm:update
+      - vm:list
+      - token:withdraw
+      - token:deposit
+      - api_key:create
+      - api_key:remove
+      - api_key:list
+      - ssh_key:create
+      - ssh_key:remove
+      - ssh_key:activate
+      - ssh_key:deactivate
+      - ssh_key:list
+      - billing:top_up
+      - billing:get_history
+      - billing:get_spending_history
+      - billing:get_spending_aggregated
+      - admin:users:read
+      - admin:users:write
+      - admin:users:whitelist
+      - admin:invites:read
+      - admin:invites:write
+      - admin:peers:write
+      - admin:default_images:read
+      - admin:default_images:write
+      - admin:users:balance:freeze
+      - admin:users:balance:increase
+      - admin:users:balance:decrease
+      - admin:users:balance:limbo
+      - admin:users:balance:refund
+      - admin:vms:read
+      - admin:vms:write
+      - admin:peers:read
+      - admin:promo_codes:read
+      - admin:promo_codes:write
+      - admin:basic_configuration:read
+      - admin:basic_configuration:create
+      - admin:basic_configuration:remove
+      - akash:write
+      - akash:read
+      - spheron:write
+      - spheron:read
+      - vm:request_access
+      - vm:requested_access
+      - storage:write
+      - storage:read
+      - public_ip:write
+      - public_ip:read
+      - subnet:write
+      - subnet:read
+      - vpc:write
+      - vpc:read
+      - security_groups:write
+      - security_groups:read
+      - admin:security_groups:write
+      - admin:security_groups:read
+      - admin:storages:read
+      - admin:subnets:read
+      - admin:public_ips:read
+      - admin:vpcs:read
+      - admin:storages:write
+      - admin:subnets:write
+      - admin:public_ips:write
+      - admin:vpcs:write
+      - clusters:read
+      - admin:prices:read
+      - admin:prices:write
+      - prices:read
+      - vms:read
+      - vms:write
+    PortsDto:
+      oneOf:
+      - type: string
+        enum:
+        - all
+      - type: object
+        required:
+        - exact
+        properties:
+          exact:
+            type: object
+            required:
+            - value
+            properties:
+              value:
+                type: integer
+                format: u-int16
+                minimum: 0
+      - type: object
+        required:
+        - range
+        properties:
+          range:
+            type: object
+            required:
+            - min
+            - max
+            properties:
+              max:
+                type: integer
+                format: u-int16
+                minimum: 0
+              min:
+                type: integer
+                format: u-int16
+                minimum: 0
+    PriceInfoDto:
+      type: object
+      required:
+      - pricePerHourPerQty
+      properties:
+        pricePerHourPerQty:
+          type: string
+          example: '0.01'
+    PricingResourceTypeDto:
+      oneOf:
+      - type: object
+        required:
+        - publicIp
+        properties:
+          publicIp:
+            type: object
+            required:
+            - resource_id
+            properties:
+              resource_id:
+                $ref: '#/components/schemas/PublicIpTypeIdDto'
+      - type: object
+        required:
+        - storage
+        properties:
+          storage:
+            type: object
+            required:
+            - resource_id
+            - volume_gb
+            properties:
+              resource_id:
+                $ref: '#/components/schemas/StorageTypeIdDto'
+              volume_gb:
+                type: integer
+                format: u-int32
+                minimum: 0
+      - type: object
+        required:
+        - vm
+        properties:
+          vm:
+            type: object
+            required:
+            - resource_id
+            properties:
+              resource_id:
+                $ref: '#/components/schemas/VmTypeIdDto'
+    PublicIpTypeIdDto:
+      type: object
+      required:
+      - addressType
+      - clusterId
+      properties:
+        addressType:
+          $ref: '#/components/schemas/IpAddressType'
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+    PublicIpePriceInfoDto:
+      type: object
+      required:
+      - publicIpTypeId
+      - priceInfo
+      properties:
+        priceInfo:
+          $ref: '#/components/schemas/PriceInfoDto'
+        publicIpTypeId:
+          $ref: '#/components/schemas/PublicIpTypeIdDto'
+    RemoveStoragesRequest:
+      type: object
+      required:
+      - dataDisks
+      properties:
+        dataDisks:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserStorageId'
+    ResourceCostDto:
+      type: object
+      required:
+      - resource
+      - costPerSec
+      properties:
+        costPerSec:
+          type: string
+          example: '0.01'
+        resource:
+          $ref: '#/components/schemas/PricingResourceTypeDto'
+    ResourceId:
+      type: string
+      format: uuid
+    ResourceTypeDto:
+      type: string
+      enum:
+      - VM
+      - PUBLIC_IP
+      - SECURITY_GROUP
+      - STORAGE
+      - SUBNET
+      - VPC
+      - WORKSPACE
+    SecurityGroupRuleDto:
+      oneOf:
+      - allOf:
+        - $ref: '#/components/schemas/SecurityGroupRuleKindDto'
+        - type: object
+          required:
+          - type
+          properties:
+            type:
+              type: string
+              enum:
+              - ipv4
+      - allOf:
+        - $ref: '#/components/schemas/SecurityGroupRuleKindDto'
+        - type: object
+          required:
+          - type
+          properties:
+            type:
+              type: string
+              enum:
+              - ipv6
+    SecurityGroupRuleKindDto:
+      type: object
+      required:
+      - protocolKind
+      - remote
+      properties:
+        protocolKind:
+          $ref: '#/components/schemas/SgProtocolKindDto'
+        remote:
+          $ref: '#/components/schemas/SgRemoteDto'
+    SecurityGroupRulesDto:
+      oneOf:
+      - type: object
+        required:
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - allowAll
+      - type: object
+        required:
+        - rules
+        - type
+        properties:
+          rules:
+            type: array
+            items:
+              $ref: '#/components/schemas/SecurityGroupRuleDto'
+          type:
+            type: string
+            enum:
+            - allow
+    ServiceStatusDto:
+      type: object
+      required:
+      - maintenanceMode
+      - version
+      properties:
+        maintenanceMode:
+          type: boolean
+        version:
+          type: string
+    SgProtocolKindDto:
+      oneOf:
+      - type: string
+        enum:
+        - all
+      - type: string
+        enum:
+        - icmp
+      - type: object
+        required:
+        - tcp
+        properties:
+          tcp:
+            type: object
+            required:
+            - ports
+            properties:
+              ports:
+                $ref: '#/components/schemas/PortsDto'
+      - type: object
+        required:
+        - udp
+        properties:
+          udp:
+            type: object
+            required:
+            - ports
+            properties:
+              ports:
+                $ref: '#/components/schemas/PortsDto'
+    SgRemoteDto:
+      oneOf:
+      - type: object
+        required:
+        - address
+        properties:
+          address:
+            type: string
+        example: 127.0.0.1/32
+      - type: object
+        required:
+        - securityGroup
+        properties:
+          securityGroup:
+            $ref: '#/components/schemas/UserSecurityGroupId'
+    StoragePriceInfoDto:
+      type: object
+      required:
+      - storageTypeId
+      - priceInfo
+      properties:
+        priceInfo:
+          $ref: '#/components/schemas/PriceInfoDto'
+        storageTypeId:
+          $ref: '#/components/schemas/StorageTypeIdDto'
+    StorageRoleDto:
+      type: string
+      enum:
+      - BOOT
+      - DATA
+    StorageType:
+      type: string
+      enum:
+      - HDD
+      - SSD
+      - NVMe
+    StorageTypeDto:
+      type: string
+      enum:
+      - HDD
+      - SSD
+      - NVME
+    StorageTypeIdDto:
+      type: object
+      required:
+      - storageType
+      - replicated
+      - clusterId
+      properties:
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        replicated:
+          type: boolean
+        storageType:
+          $ref: '#/components/schemas/StorageTypeDto'
+    StorageTypeInfoDto:
+      type: object
+      required:
+      - storageType
+      - bootDisk
+      - minVolumeGb
+      - maxBandwidthReadMib
+      - maxBandwidthWriteMib
+      - maxIopsRead
+      - maxIopsWrite
+      properties:
+        bootDisk:
+          type: boolean
+        maxBandwidthReadMib:
+          type: integer
+          format: u-int64
+          minimum: 0
+        maxBandwidthWriteMib:
+          type: integer
+          format: u-int64
+          minimum: 0
+        maxIopsRead:
+          type: integer
+          format: u-int64
+          minimum: 0
+        maxIopsWrite:
+          type: integer
+          format: u-int64
+          minimum: 0
+        minVolumeGb:
+          type: integer
+          format: u-int64
+          minimum: 0
+        storageType:
+          $ref: '#/components/schemas/StorageTypeDto'
+    TopUpDto:
+      type: object
+      required:
+      - id
+      - userId
+      - currency
+      - amount
+      - copperxFee
+      - copperxGasFee
+      - status
+      - createdAt
+      - updatedAt
+      properties:
+        amount:
+          type: integer
+          format: u-int64
+          minimum: 0
+        balanceContractTxAddress:
+          type:
+          - string
+          - 'null'
+        copperxFee:
+          type: integer
+          format: u-int64
+          minimum: 0
+        copperxGasFee:
+          type: integer
+          format: u-int64
+          minimum: 0
+        copperxSessionId:
+          type:
+          - string
+          - 'null'
+        copperxSessionUrl:
+          type:
+          - string
+          - 'null'
+        createdAt:
+          type: string
+          example: 2024-01-01T00:00:000000Z
+        currency:
+          $ref: '#/components/schemas/Currency'
+        id:
+          $ref: '#/components/schemas/TopUpId'
+        status:
+          $ref: '#/components/schemas/TopUpStatusDTO'
+        updatedAt:
+          type: string
+          example: 2024-01-01T00:00:000000Z
+        userId:
+          $ref: '#/components/schemas/UserId'
+    TopUpId:
+      type: string
+      format: uuid
+    TopUpRequest:
+      type: object
+      required:
+      - amount
+      properties:
+        amount:
+          type: integer
+          format: int64
+        currency:
+          $ref: '#/components/schemas/Currency'
+    TopUpStatusDTO:
+      type: string
+      enum:
+      - created
+      - failed
+      - canceled
+      - expired
+      - pending
+      - completed
+      - aml_failed
+    TotalChargesEntry:
+      type: object
+      required:
+      - userId
+      - resourceId
+      - resourceType
+      - resourceName
+      - clusterId
+      - quantity
+      - totalUsageHours
+      - totalCost
+      properties:
+        clusterId:
+          type: string
+          example: 9ba32273-49e6-4655-b193-b29f61752c2f
+        ipAddressType:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/IpAddressType'
+        quantity:
+          type: string
+        replicatedStorage:
+          type:
+          - boolean
+          - 'null'
+        resourceId:
+          $ref: '#/components/schemas/ResourceId'
+        resourceName:
+          type: string
+        resourceType:
+          $ref: '#/components/schemas/ResourceTypeDto'
+        storageType:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/StorageType'
+        totalCost:
+          type: string
+        totalUsageHours:
+          type: string
+        userId:
+          type: string
+          example: 9ba32273-49e6-4655-b193-b29f61752c2f
+        vmConfiguration:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/VmConfigurationSlug'
+    TotalChargesResponse:
+      type: object
+      required:
+      - total
+      properties:
+        total:
+          type: string
+      additionalProperties:
+        type: string
+    UpdateNetworkInterfaceRequest:
+      type: object
+      properties:
+        securityGroupId:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/UserSecurityGroupId'
+    UpdateUserProfileRequest:
+      type: object
+      properties:
+        company:
+          type:
+          - string
+          - 'null'
+        firstName:
+          type:
+          - string
+          - 'null'
+        jobRole:
+          type:
+          - string
+          - 'null'
+        lastName:
+          type:
+          - string
+          - 'null'
+    UpdateUserPublicIpRequest:
+      type: object
+      properties:
+        name:
+          type:
+          - string
+          - 'null'
+    UpdateUserSecurityGroupRequest:
+      type: object
+      properties:
+        egressRules:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/SecurityGroupRulesDto'
+        ingressRules:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/SecurityGroupRulesDto'
+            description: |-
+              `absent` — не менять; `null` — сбросить к дефолту (`AllowAll`);
+              объект — установить конкретные правила.
+        name:
+          type:
+          - string
+          - 'null'
+    UpdateUserStorageRequest:
+      type: object
+      properties:
+        name:
+          type:
+          - string
+          - 'null'
+        volumeGb:
+          type:
+          - integer
+          - 'null'
+          format: u-int32
+          minimum: 0
+    UpdateUserSubnetRequest:
+      type: object
+      properties:
+        name:
+          type:
+          - string
+          - 'null'
+    UpdateUserVmRequest:
+      type: object
+      properties:
+        name:
+          type:
+          - string
+          - 'null'
+    UpdateUserVpcRequest:
+      type: object
+      properties:
+        name:
+          type:
+          - string
+          - 'null'
+    UserId:
+      type: string
+      format: uuid
+    UserProfileDto:
+      type: object
+      required:
+      - firstName
+      - lastName
+      - jobRole
+      - company
+      - updatedAt
+      properties:
+        company:
+          type: string
+          example: Cloudless
+        firstName:
+          type: string
+          example: Igor
+        jobRole:
+          type: string
+          example: Designer
+        lastName:
+          type: string
+          example: Ten
+        promptAcknowledgedAt:
+          type:
+          - string
+          - 'null'
+          example: 2025-01-01T00:00:00.000Z
+        updatedAt:
+          type: string
+          example: 2025-01-01T00:00:00.000Z
+    UserPublicIpDto:
+      type: object
+      required:
+      - id
+      - userId
+      - clusterId
+      - name
+      - addressType
+      - status
+      - createdAt
+      properties:
+        address:
+          type:
+          - string
+          - 'null'
+        addressType:
+          $ref: '#/components/schemas/IpAddressType'
+        attachedTo:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/UserVmId'
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        createdAt:
+          type: string
+          format: date-time
+        id:
+          $ref: '#/components/schemas/UserPublicIpId'
+        lastPaidAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        name:
+          type: string
+        paidUntil:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        readySince:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        removedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        status:
+          $ref: '#/components/schemas/UserPublicIpStatusDto'
+        userId:
+          $ref: '#/components/schemas/UserId'
+    UserPublicIpId:
+      type: string
+      format: uuid
+    UserPublicIpIdsDto:
+      type: object
+      required:
+      - ids
+      properties:
+        ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserPublicIpId'
+    UserPublicIpStatusDto:
+      type: string
+      enum:
+      - new
+      - created
+      - ready
+      - failed
+      - removing
+      - removed
+    UserSecurityGroupDto:
+      type: object
+      required:
+      - id
+      - userId
+      - clusterId
+      - vpcId
+      - name
+      - status
+      - ingressRules
+      - egressRules
+      - createdAt
+      - attachedTo
+      properties:
+        attachedTo:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserVmNetworkInterfaceId'
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        createdAt:
+          type: string
+          format: date-time
+        egressRules:
+          $ref: '#/components/schemas/SecurityGroupRulesDto'
+        id:
+          $ref: '#/components/schemas/UserSecurityGroupId'
+        ingressRules:
+          $ref: '#/components/schemas/SecurityGroupRulesDto'
+        name:
+          type: string
+        readySince:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        removedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        status:
+          $ref: '#/components/schemas/UserSecurityGroupStatusDto'
+        userId:
+          $ref: '#/components/schemas/UserId'
+        vpcId:
+          $ref: '#/components/schemas/UserVpcId'
+    UserSecurityGroupId:
+      type: string
+      format: uuid
+    UserSecurityGroupIdsDto:
+      type: object
+      required:
+      - ids
+      properties:
+        ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSecurityGroupId'
+    UserSecurityGroupStatusDto:
+      type: string
+      enum:
+      - new
+      - created
+      - ready
+      - updating
+      - failed
+      - removing
+      - removed
+    UserSshKeyDto:
+      type: object
+      required:
+      - id
+      - userId
+      - name
+      - publicKey
+      - algorithm
+      - fingerprint
+      properties:
+        algorithm:
+          type: string
+        fingerprint:
+          type: string
+        id:
+          $ref: '#/components/schemas/UserSshKeyId'
+        name:
+          type: string
+        publicKey:
+          type: string
+        userId:
+          $ref: '#/components/schemas/UserId'
+    UserSshKeyId:
+      type: string
+      format: uuid
+    UserSshKeyIdsDto:
+      type: object
+      required:
+      - ids
+      properties:
+        ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSshKeyId'
+    UserStorageDto:
+      type: object
+      required:
+      - id
+      - userId
+      - clusterId
+      - name
+      - storageType
+      - status
+      - role
+      - volumeGb
+      - attachedTo
+      - createdAt
+      properties:
+        attachedTo:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserVmId'
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        createdAt:
+          type: string
+          format: date-time
+        id:
+          $ref: '#/components/schemas/UserStorageId'
+        initUrl:
+          type:
+          - string
+          - 'null'
+        lastPaidAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        name:
+          type: string
+        paidUntil:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        readySince:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        removedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        role:
+          $ref: '#/components/schemas/StorageRoleDto'
+        status:
+          $ref: '#/components/schemas/UserStorageStatusDto'
+        storageType:
+          $ref: '#/components/schemas/StorageTypeDto'
+        userId:
+          $ref: '#/components/schemas/UserId'
+        volumeGb:
+          type: integer
+          format: u-int64
+          minimum: 0
+    UserStorageId:
+      type: string
+      format: uuid
+    UserStorageIdsDto:
+      type: object
+      required:
+      - ids
+      properties:
+        ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserStorageId'
+    UserStorageStatusDto:
+      type: string
+      enum:
+      - new
+      - created
+      - ready
+      - updating
+      - failed
+      - removing
+      - removed
+    UserSubnetDto:
+      type: object
+      required:
+      - id
+      - userId
+      - clusterId
+      - vpcId
+      - name
+      - status
+      properties:
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        id:
+          $ref: '#/components/schemas/UserSubnetId'
+        ipv4Cidr:
+          type:
+          - string
+          - 'null'
+          example: 10.0.0.0/24
+        ipv6Cidr:
+          type:
+          - string
+          - 'null'
+          example: 2001:db8::/64
+        name:
+          type: string
+        readySince:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        removedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        status:
+          $ref: '#/components/schemas/UserSubnetStatusDto'
+        userId:
+          $ref: '#/components/schemas/UserId'
+        vpcId:
+          $ref: '#/components/schemas/UserVpcId'
+    UserSubnetId:
+      type: string
+      format: uuid
+    UserSubnetIdsDto:
+      type: object
+      required:
+      - ids
+      properties:
+        ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSubnetId'
+    UserSubnetStatusDto:
+      type: string
+      enum:
+      - new
+      - created
+      - ready
+      - failed
+      - removing
+      - removed
+    UserVmDto:
+      type: object
+      required:
+      - id
+      - userId
+      - clusterId
+      - configurationId
+      - name
+      - status
+      - restartRequired
+      - dataDisks
+      - subnets
+      - sshKeys
+      - networkInterfaces
+      - createdAt
+      - updatedAt
+      properties:
+        bootDisk:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/UserStorageId'
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        configurationId:
+          $ref: '#/components/schemas/VmConfigurationId'
+        createdAt:
+          type: string
+          format: date-time
+        dataDisks:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserStorageId'
+        id:
+          $ref: '#/components/schemas/UserVmId'
+        lastPaidAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        name:
+          type: string
+        networkInterfaces:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserVmNetworkInterfaceId'
+        paidUntil:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        publicIp:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/UserPublicIpId'
+        readySince:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        restartRequired:
+          type: boolean
+        sshKeys:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSshKeyId'
+        status:
+          $ref: '#/components/schemas/UserVmStatusDto'
+        subnets:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSubnetId'
+        terminatedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        userId:
+          $ref: '#/components/schemas/UserId'
+    UserVmId:
+      type: string
+      format: uuid
+    UserVmNetworkInterfaceId:
+      type: string
+      format: uuid
+    UserVmStatusDto:
+      type: string
+      enum:
+      - new
+      - launching
+      - launched
+      - failed
+      - updating
+      - terminating
+      - terminated
+      - suspending
+      - suspended
+      - restarting
+      - softRebooting
+    UserVpcDto:
+      type: object
+      required:
+      - id
+      - userId
+      - clusterId
+      - name
+      - status
+      - subnetsCount
+      - createdAt
+      properties:
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        createdAt:
+          type: string
+          format: date-time
+        enableExternal:
+          type:
+          - boolean
+          - 'null'
+        id:
+          $ref: '#/components/schemas/UserVpcId'
+        name:
+          type: string
+        readySince:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        removedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        status:
+          $ref: '#/components/schemas/UserVpcStatusDto'
+        subnetsCount:
+          type: integer
+          format: u-int32
+          minimum: 0
+        userId:
+          $ref: '#/components/schemas/UserId'
+    UserVpcId:
+      type: string
+      format: uuid
+    UserVpcIdsDto:
+      type: object
+      required:
+      - ids
+      properties:
+        ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserVpcId'
+    UserVpcStatusDto:
+      type: string
+      enum:
+      - new
+      - created
+      - ready
+      - failed
+      - removing
+      - removed
+    UserWithScopesDto:
+      type: object
+      required:
+      - id
+      - email
+      - permissions
+      properties:
+        email:
+          type: string
+          example: user@gmail.com
+        id:
+          type: string
+          example: 9ba32273-49e6-4655-b193-b29f61752c2f
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionScope'
+          uniqueItems: true
+    VmBootDisk:
+      oneOf:
+      - $ref: '#/components/schemas/UserStorageId'
+      - $ref: '#/components/schemas/CreateUserStorageRequest'
+    VmConfigurationDto:
+      type: object
+      required:
+      - id
+      - slug
+      - name
+      - vcpu
+      - ramGb
+      - dedicated
+      - cpuFamilies
+      - preset
+      - tags
+      - description
+      properties:
+        cpuFamilies:
+          type: array
+          items:
+            $ref: '#/components/schemas/CpuFamilyDto'
+        dedicated:
+          type: boolean
+        description:
+          type: string
+        id:
+          $ref: '#/components/schemas/VmConfigurationId'
+        name:
+          type: string
+        preset:
+          $ref: '#/components/schemas/VmConfigurationPreset'
+        ramGb:
+          type: integer
+          format: u-int64
+          example: '4'
+          minimum: 0
+        slug:
+          $ref: '#/components/schemas/VmConfigurationSlug'
+        tags:
+          type: array
+          items:
+            type: string
+        vcpu:
+          type: integer
+          format: u-int8
+          example: '2'
+          minimum: 0
+    VmConfigurationId:
+      type: string
+      format: uuid
+    VmConfigurationPreset:
+      type: string
+      enum:
+      - general
+      - cpu_optimized
+      - memory_optimized
+    VmConfigurationSlug:
+      type: string
+      enum:
+      - cpu-regular-2vcpu-4gb
+      - cpu-regular-4vcpu-8gb
+      - cpu-regular-8vcpu-16gb
+      - cpu-regular-8vcpu-32gb
+      - cpu-regular-16vcpu-32gb
+      - cpu-regular-24vcpu-48gb
+      - cpu-regular-32vcpu-64gb
+      - cpu-regular-64vcpu-128gb
+      - cpu-premium-2vcpu-4gb
+      - cpu-premium-4vcpu-8gb
+      - cpu-premium-8vcpu-16gb
+      - cpu-premium-8vcpu-32gb
+      - cpu-premium-16vcpu-32gb
+      - cpu-premium-24vcpu-48gb
+      - cpu-premium-32vcpu-64gb
+      - cpu-premium-64vcpu-128gb
+    VmDataDisk:
+      oneOf:
+      - $ref: '#/components/schemas/UserStorageId'
+      - $ref: '#/components/schemas/CreateUserStorageRequest'
+    VmNetworkInterfaceDto:
+      type: object
+      required:
+      - id
+      - default
+      - kind
+      properties:
+        default:
+          type: boolean
+        id:
+          $ref: '#/components/schemas/UserVmNetworkInterfaceId'
+        kind:
+          $ref: '#/components/schemas/NetworkInterfaceKindDto'
+        securityGroup:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/UserSecurityGroupId'
+    VmPriceInfoDto:
+      type: object
+      required:
+      - vmTypeId
+      - priceInfo
+      properties:
+        priceInfo:
+          $ref: '#/components/schemas/PriceInfoDto'
+        vmTypeId:
+          $ref: '#/components/schemas/VmTypeIdDto'
+    VmPublicIp:
+      oneOf:
+      - $ref: '#/components/schemas/UserPublicIpId'
+      - $ref: '#/components/schemas/CreateUserPublicIdRequest'
+    VmTypeIdDto:
+      type: object
+      required:
+      - vmConfigurationId
+      - clusterId
+      properties:
+        clusterId:
+          $ref: '#/components/schemas/ClusterId'
+        vmConfigurationId:
+          $ref: '#/components/schemas/VmConfigurationId'
+  responses:
+    ErrorBody:
+      description: it may be useful to add id for unique error identification
+      content:
+        application/json:
+          schema:
+            type: object
+            description: it may be useful to add id for unique error identification
+            required:
+            - error
+            properties:
+              error:
+                type: string
+                description: The error message
+  securitySchemes:
+    access_jwt_token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token issued by Fluence
+    api_key:
+      type: apiKey
+      in: header
+      name: X-API-KEY
+security:
+- api_key: []
+tags:
+- name: SSH keys
+  description: Endpoints to manage SSH keys
+- name: VMs
+  description: Endpoints to create, view, update and delete VMs
+- name: Hardware
+  description: Hardware API endpoints
+- name: Prices
+  description: Endpoints to get prices for different resources and cost estimation
+- name: Subnets
+  description: Endpoints to create, view, update and delete subnets
+- name: VPCs
+  description: Endpoints to create, view, update and delete VPCs
+- name: Storage
+  description: Endpoints to create, view, update and delete storage resources
+- name: SecurityGroup
+  description: Endpoints to create, view, update and delete security groups
+- name: Users
+  description: Users API endpoints
+- name: Billing
+  description: Billing and payment related endpoints

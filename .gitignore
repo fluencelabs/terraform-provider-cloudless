@@ -19,3 +19,4 @@ terraform.rc
 
 # Local dev builds (terraform dev_overrides)
 .local-bin/
+/terraform-provider-cloudless
