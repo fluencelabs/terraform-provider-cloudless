@@ -102,12 +102,17 @@ func (s *Server) handleSubnetBulkDelete(w http.ResponseWriter, r *http.Request) 
 		IDs []string `json:"ids"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	// The endpoint answers with the objects it deleted.
+	deleted := []map[string]any{}
 	s.mu.Lock()
 	for _, id := range body.IDs {
-		delete(s.subnetMap, id)
+		if rec, ok := s.subnetMap[id]; ok {
+			deleted = append(deleted, subnetWire(rec))
+			delete(s.subnetMap, id)
+		}
 	}
 	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
+	s.writeJSON(w, http.StatusOK, deleted)
 }
 
 func subnetWire(rec *subnetRecord) map[string]any {

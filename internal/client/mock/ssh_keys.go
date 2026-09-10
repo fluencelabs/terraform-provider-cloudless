@@ -57,7 +57,7 @@ func (s *Server) createSSHKey(w http.ResponseWriter, r *http.Request) {
 	// of the same material returns 409.
 	for _, k := range s.sshKeyMap {
 		if sameSSHKeyBody(k.PublicKey, body.PublicKey) {
-			s.writeJSON(w, http.StatusConflict, map[string]string{"error": "SshKey already exists"})
+			s.writeJSON(w, http.StatusConflict, map[string]string{"error": "SshKey already exists", "code": "conflict"})
 			return
 		}
 	}
@@ -107,12 +107,18 @@ func (s *Server) handleSSHKeysBulkDelete(w http.ResponseWriter, r *http.Request)
 		IDs []string `json:"ids"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	// The endpoint answers with the objects it deleted; returning a bare 200
+	// makes the response contract fail.
+	deleted := []map[string]any{}
 	s.mu.Lock()
 	for _, id := range body.IDs {
-		delete(s.sshKeyMap, id)
+		if rec, ok := s.sshKeyMap[id]; ok {
+			deleted = append(deleted, sshKeyWire(rec))
+			delete(s.sshKeyMap, id)
+		}
 	}
 	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
+	s.writeJSON(w, http.StatusOK, deleted)
 }
 
 // sameSSHKeyBody compares two OpenSSH public keys by algorithm + base64 body,

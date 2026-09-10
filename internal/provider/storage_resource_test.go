@@ -9,7 +9,7 @@ import (
 )
 
 func TestUnitStorage_CreateAndResize(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{

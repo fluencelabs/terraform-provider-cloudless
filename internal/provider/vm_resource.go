@@ -489,14 +489,8 @@ func (r *vmResource) updateNICs(ctx context.Context, id string, state, plan vmMo
 	if err != nil || !changed {
 		return err
 	}
-	vm, err := r.c.GetVM(ctx, id)
-	if err != nil {
-		return err
-	}
-	if vm.RestartRequired {
-		if rerr := restartAndWaitReady(ctx, r.c, id); rerr != nil {
-			return fmt.Errorf("restart: %w", rerr)
-		}
+	if rerr := restartIfFlagged(ctx, r.c, id); rerr != nil {
+		return fmt.Errorf("restart: %w", rerr)
 	}
 	return nil
 }

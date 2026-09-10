@@ -79,7 +79,7 @@ const scWebNICs = `
 // opens 22 for maintenance by editing the security group — the VM itself is
 // untouched and never restarted.
 func TestScenario_WebServer_OpenPortLater(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	var vmID string
 
@@ -118,7 +118,7 @@ func TestScenario_WebServer_OpenPortLater(t *testing.T) {
 // A bastion with a public IP and an application VM that is private-only and
 // accepts traffic solely from the bastion's security group.
 func TestScenario_BastionAndPrivateApp(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	cfg := fmt.Sprintf(`
@@ -188,7 +188,7 @@ resource "cloudless_security_group" "app" {
 // A reserved public IP is moved from an old VM to its replacement in one
 // apply: both VMs update in place and the address ends up on the new one.
 func TestScenario_MoveReservedIPBetweenVMs(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	var oldID, newID string
 
@@ -259,7 +259,7 @@ resource "cloudless_public_ip" "edge" {
 // A database VM outgrows its disk: the data volume is resized in place and a
 // second volume is attached, without recreating the VM.
 func TestScenario_GrowStorageAndAddDisk(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	var vmID string
 
@@ -313,7 +313,7 @@ resource "cloudless_storage" %[1]q {
 
 // Renaming a VM and its security group is an in-place update.
 func TestScenario_RenameInPlace(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	var vmID string
 	sg := func(name string) string {
@@ -372,7 +372,7 @@ resource "cloudless_vm" "web" {
 // A VM created outside Terraform is imported by id: its interfaces show up as
 // blocks and a matching configuration plans empty afterwards.
 func TestScenario_ImportExistingVM(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	cfg := scVM("legacy", scWebNICs)
 
@@ -401,7 +401,7 @@ func TestScenario_ImportExistingVM(t *testing.T) {
 // Switching the boot image is a rebuild: the VM is replaced, and the public
 // IP it owned is released with the old VM and recreated with the new one.
 func TestScenario_ReplaceBootImageRebuildsVM(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	var vmID, oldIP string
 
@@ -458,7 +458,7 @@ resource "cloudless_vm" "web" {
 // The simplest VM: no network blocks at all. The server default interface is
 // used, mirrored in subnet_ids, and the configuration stays stable.
 func TestScenario_MinimalVMUsesServerDefaultNetwork(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	cfg := scVM("tiny", "")
 

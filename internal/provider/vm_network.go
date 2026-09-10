@@ -376,14 +376,45 @@ func attachExistingPublicNICs(ctx context.Context, c *client.Client, vmID string
 	if !attached {
 		return nil
 	}
-	vm, err := c.GetVM(ctx, vmID)
+	return restartIfFlagged(ctx, c, vmID)
+}
+
+// restartIfFlagged restarts the VM when the API asks for it, waiting for the
+// VM to stop reconciling first: a flag read while it is still `updating` can
+// be the value from before the change, and skipping the restart there leaves
+// the change without effect.
+func restartIfFlagged(ctx context.Context, c *client.Client, vmID string) error {
+	vm, err := waitSettled(ctx, c, vmID)
 	if err != nil {
 		return err
 	}
-	if vm.RestartRequired {
-		return restartAndWaitReady(ctx, c, vmID)
+	if !vm.RestartRequired {
+		return nil
 	}
-	return nil
+	return restartAndWaitReady(ctx, c, vmID)
+}
+
+// waitSettled polls the VM until its status is one the API will not move on
+// its own, and returns that reading.
+func waitSettled(ctx context.Context, c *client.Client, vmID string) (*client.VM, error) {
+	var last *client.VM
+	var blip transientWindow
+	err := waitFor(ctx, interfacePoll(), func(ctx context.Context) error {
+		vm, gerr := c.GetVM(ctx, vmID)
+		if gerr != nil {
+			return blip.absorb(gerr)
+		}
+		blip.clear()
+		last = vm
+		if isSettled(vm.Status) {
+			return errStopPolling
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("waiting for vm %s to settle: %w", vmID, err)
+	}
+	return last, nil
 }
 
 func addRequestFor(n vmNICModel, draft bool) client.AddInterfaceRequest {
@@ -557,14 +588,8 @@ func withLastAnswer(err, last error) error {
 // VM, restarting it first when the API asks for it: on a live VM the removal
 // is applied by the restart, and the released IP stays "attached" until then.
 func settleRemovedNICs(ctx context.Context, c *client.Client, vmID string, removed []string) error {
-	vm, err := c.GetVM(ctx, vmID)
-	if err != nil {
-		return err
-	}
-	if vm.RestartRequired {
-		if rerr := restartAndWaitReady(ctx, c, vmID); rerr != nil {
-			return fmt.Errorf("restart after removing interfaces: %w", rerr)
-		}
+	if rerr := restartIfFlagged(ctx, c, vmID); rerr != nil {
+		return fmt.Errorf("restart after removing interfaces: %w", rerr)
 	}
 	gone := map[string]bool{}
 	for _, id := range removed {
@@ -897,7 +922,16 @@ func restartAndWaitReady(ctx context.Context, c *client.Client, vmID string) err
 		switch {
 		case rErr == nil:
 			return errStopPolling
-		case client.IsNotAcceptable(rErr) || isTransient(rErr):
+		case client.IsNotAcceptable(rErr):
+			// The VM is transitional — often because someone else's restart
+			// is running. That restart may clear the flag, so re-read before
+			// asking again rather than stacking a second reboot on top.
+			last = rErr
+			if vm, gerr := c.GetVM(ctx, vmID); gerr == nil && isSettled(vm.Status) && !vm.RestartRequired {
+				return errStopPolling
+			}
+			return nil
+		case isTransient(rErr):
 			last = rErr
 			return nil
 		default:

@@ -102,12 +102,18 @@ func (s *Server) handleStorageBulkDelete(w http.ResponseWriter, r *http.Request)
 		IDs []string `json:"ids"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	// The endpoint answers with the objects it deleted; returning a bare 200
+	// makes the response contract fail.
+	deleted := []map[string]any{}
 	s.mu.Lock()
 	for _, id := range body.IDs {
-		delete(s.storageMap, id)
+		if rec, ok := s.storageMap[id]; ok {
+			deleted = append(deleted, storageWire(rec))
+			delete(s.storageMap, id)
+		}
 	}
 	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
+	s.writeJSON(w, http.StatusOK, deleted)
 }
 
 // handleStorageItem serves PATCH /v1/storages/{id}.

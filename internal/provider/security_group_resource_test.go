@@ -10,7 +10,7 @@ import (
 )
 
 func TestUnitSecurityGroup_AllowAll(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -34,7 +34,7 @@ resource "cloudless_security_group" "wide" {
 }
 
 func TestUnitSecurityGroup_AllowListed(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -60,7 +60,7 @@ resource "cloudless_security_group" "web" {
 }
 
 func TestUnitSecurityGroup_DenyAll(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -81,7 +81,7 @@ resource "cloudless_security_group" "tight" {
 }
 
 func TestUnitSecurityGroup_AllowListedRequiresBlocks(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{

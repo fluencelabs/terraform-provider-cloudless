@@ -61,22 +61,7 @@ func (s *Server) wireVPCs() {
 	})
 	// /v1/vpcs/delete is an exact path; ServeMux prefers exact matches over
 	// the /v1/vpcs/ prefix, so register both.
-	s.mux.HandleFunc("/v1/vpcs/delete", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			s.notFound(w, r)
-			return
-		}
-		var body struct {
-			IDs []string `json:"ids"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		s.mu.Lock()
-		for _, id := range body.IDs {
-			delete(s.vpcMap, id)
-		}
-		s.mu.Unlock()
-		w.WriteHeader(http.StatusOK)
-	})
+	s.mux.HandleFunc("/v1/vpcs/delete", s.handleVPCBulkDelete)
 	s.mux.HandleFunc("/v1/vpcs/", func(w http.ResponseWriter, r *http.Request) {
 		// POST /v1/vpcs/{id}/subnets shares the prefix; hand it to subnets.
 		if p := splitPath(r.URL.Path); len(p) == subnetCreatePathParts && p[3] == "subnets" {
@@ -164,4 +149,27 @@ func (s *Server) SeedVPC(id, name, clusterID string) {
 		s.vpcMap = map[string]*vpcRecord{}
 	}
 	s.vpcMap[id] = &vpcRecord{ID: id, Name: name, ClusterID: clusterID, UserID: "test-user", Status: "ready"}
+}
+
+// handleVPCBulkDelete answers with the objects it deleted, as the endpoint
+// declares.
+func (s *Server) handleVPCBulkDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.notFound(w, r)
+		return
+	}
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	deleted := []map[string]any{}
+	s.mu.Lock()
+	for _, id := range body.IDs {
+		if rec, ok := s.vpcMap[id]; ok {
+			deleted = append(deleted, vpcWire(rec))
+			delete(s.vpcMap, id)
+		}
+	}
+	s.mu.Unlock()
+	s.writeJSON(w, http.StatusOK, deleted)
 }

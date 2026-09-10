@@ -25,7 +25,9 @@ func (s *Server) contractMiddleware(next http.Handler) http.Handler {
 		if s.contractEnforce && s.reqBodyValidator != nil && methodHasBody(r.Method) && r.Body != nil {
 			body, err := io.ReadAll(r.Body)
 			_ = r.Body.Close()
-			if err == nil && len(body) > 0 {
+			// An absent body is validated too: skipping it would let a
+			// request that omits a required body pass the contract.
+			if err == nil {
 				probe := r.Clone(r.Context())
 				probe.Body = io.NopCloser(bytes.NewReader(body))
 				s.validateMu.Lock()

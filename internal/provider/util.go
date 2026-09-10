@@ -366,6 +366,19 @@ const (
 
 // terminalFailure returns true for status strings the API uses to signal a
 // non-recoverable end state.
+// isSettled reports whether a VM's status is one the API will not move on
+// its own. A flag read while the VM is still reconciling can be the value
+// from before the change (observed by review on the /v2 lifecycle: updating
+// with the previous restartRequired).
+func isSettled(status string) bool {
+	switch status {
+	case "new", "launching", "updating", "restarting", "softRebooting", "suspending", "terminating":
+		return false
+	default:
+		return true
+	}
+}
+
 func terminalFailure(status string) bool {
 	return status == statusFailed
 }

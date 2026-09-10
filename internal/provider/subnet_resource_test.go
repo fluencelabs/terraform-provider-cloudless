@@ -9,7 +9,7 @@ import (
 )
 
 func TestUnitSubnet_DerivesClusterIDFromVPC(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	h.Mock.SeedVPC("99999999-9999-4999-8999-999999999999", "main", "cluster-X")
 	// (Subnet endpoints are auto-wired by mock.New(); no extra seeding needed.)

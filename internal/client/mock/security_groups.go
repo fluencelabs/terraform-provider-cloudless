@@ -119,12 +119,18 @@ func (s *Server) handleSGBulkDelete(w http.ResponseWriter, r *http.Request) {
 		IDs []string `json:"ids"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	// The endpoint answers with the objects it deleted; returning a bare 200
+	// makes the response contract fail.
+	deleted := []map[string]any{}
 	s.mu.Lock()
 	for _, id := range body.IDs {
-		delete(s.sgMap, id)
+		if rec, ok := s.sgMap[id]; ok {
+			deleted = append(deleted, sgWire(rec))
+			delete(s.sgMap, id)
+		}
 	}
 	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
+	s.writeJSON(w, http.StatusOK, deleted)
 }
 
 // handleSGItem serves PATCH /v1/security_groups/{id}.

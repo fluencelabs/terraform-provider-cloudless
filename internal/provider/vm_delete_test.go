@@ -31,7 +31,7 @@ func captureAttr(addr, attr string, out *string) resource.TestCheckFunc {
 // so vmResource.Delete must delete the boot disk storage explicitly. Without
 // that cleanup the storage volume is orphaned and keeps billing.
 func TestUnitVM_Delete_RemovesInlineBootDisk(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	var bootDiskID string

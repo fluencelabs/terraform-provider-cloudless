@@ -168,7 +168,7 @@ func (s *Server) updateVM(w http.ResponseWriter, r *http.Request, rec *vmRecord)
 func (s *Server) handleVMVerb(w http.ResponseWriter, r *http.Request, rec *vmRecord, verb string) {
 	switch {
 	case verb == "terminate" && r.Method == http.MethodPost:
-		s.terminateVM(w, rec.ID)
+		s.terminateVM(w, rec)
 	case (verb == "restart" || verb == "softreboot") && r.Method == http.MethodPost:
 		s.restartVM(w, rec)
 	case verb == interfacesVerb && r.Method == http.MethodGet:
@@ -192,11 +192,14 @@ func (s *Server) handleVMSubresource(w http.ResponseWriter, r *http.Request, rec
 	}
 }
 
-func (s *Server) terminateVM(w http.ResponseWriter, vmID string) {
+// terminateVM answers with the terminated VM, as the endpoint declares; the
+// record is rendered before it is dropped.
+func (s *Server) terminateVM(w http.ResponseWriter, rec *vmRecord) {
 	s.mu.Lock()
-	delete(s.vmMap, vmID)
+	wire := vmWire(rec)
+	delete(s.vmMap, rec.ID)
 	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
+	s.writeJSON(w, http.StatusOK, wire)
 }
 
 // restartVM serves POST /v2/vms/{id}/{restart,softreboot}. The real API clears
@@ -218,8 +221,9 @@ func (s *Server) addVMStorages(w http.ResponseWriter, r *http.Request, rec *vmRe
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	s.mu.Lock()
 	rec.DataDisks = append(rec.DataDisks, body.DataDisks...)
+	wire := vmWire(rec)
 	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
+	s.writeJSON(w, http.StatusOK, wire)
 }
 
 func (s *Server) removeVMStorages(w http.ResponseWriter, r *http.Request, rec *vmRecord) {
@@ -230,7 +234,7 @@ func (s *Server) removeVMStorages(w http.ResponseWriter, r *http.Request, rec *v
 		s.writeJSON(
 			w,
 			http.StatusInternalServerError,
-			map[string]string{"error": "injected: storages/remove failure"},
+			map[string]string{"error": "injected: storages/remove failure", "code": "internal_server_error"},
 		)
 		return
 	}
@@ -250,8 +254,9 @@ func (s *Server) removeVMStorages(w http.ResponseWriter, r *http.Request, rec *v
 		}
 	}
 	rec.DataDisks = kept
+	wire := vmWire(rec)
 	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
+	s.writeJSON(w, http.StatusOK, wire)
 }
 
 func vmWire(rec *vmRecord) map[string]any {

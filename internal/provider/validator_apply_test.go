@@ -13,7 +13,7 @@ import (
 // vpc.cluster_id actually fires at plan time, not just in unit-test isolation.
 // Plan-time rejection means the API never sees the bad value.
 func TestUnitValidator_RejectsInvalidUUID(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{

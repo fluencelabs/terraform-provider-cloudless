@@ -9,7 +9,7 @@ import (
 )
 
 func TestUnitClustersDataSource_FilterRegions(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	h.Mock.SeedDatacenter("dc-de", "DE", "FRA", "fra-1")
 	h.Mock.SeedDatacenter("dc-pl", "PL", "WAW", "waw-1")

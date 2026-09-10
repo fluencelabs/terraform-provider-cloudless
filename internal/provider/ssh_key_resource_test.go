@@ -15,7 +15,7 @@ import (
 )
 
 func TestUnitSSHKey_CreateAndRead(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -51,7 +51,7 @@ resource "cloudless_ssh_key" "me" {
 // create returns 409; the provider must adopt the existing key rather than
 // fail, and the adoption must be stable (no replace-loop on the next plan).
 func TestUnitSSHKey_AdoptsExistingKeyOnConflict(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	const body = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIME9HKAAGtKnkZNQHQ"
@@ -105,7 +105,7 @@ resource "cloudless_ssh_key" "me" {
 }
 
 func TestUnitSSHKey_RenameForcesReplacement(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	cfg := func(name string) string {

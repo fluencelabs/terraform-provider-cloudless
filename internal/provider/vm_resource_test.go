@@ -39,7 +39,7 @@ func requireSameID(addr string, want *string) resource.TestCheckFunc {
 }
 
 func TestUnitVM_CreateMinimal(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -76,7 +76,7 @@ resource "cloudless_vm" "app" {
 }
 
 func TestUnitVM_DataDiskIDsSmartUpdate(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	var initialVMID string
@@ -271,7 +271,7 @@ resource "cloudless_vm" "app" {
 }
 
 func TestUnitVM_PartialUpdateRefreshesState(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{

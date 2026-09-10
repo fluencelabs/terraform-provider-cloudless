@@ -99,12 +99,18 @@ func (s *Server) handlePublicIPBulkDelete(w http.ResponseWriter, r *http.Request
 		IDs []string `json:"ids"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	// The endpoint answers with the objects it deleted; returning a bare 200
+	// makes the response contract fail.
+	deleted := []map[string]any{}
 	s.mu.Lock()
 	for _, id := range body.IDs {
-		delete(s.publicIPMap, id)
+		if rec, ok := s.publicIPMap[id]; ok {
+			deleted = append(deleted, publicIPWire(rec))
+			delete(s.publicIPMap, id)
+		}
 	}
 	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
+	s.writeJSON(w, http.StatusOK, deleted)
 }
 
 // handlePublicIPItem serves PATCH /v1/public_ips/{id}.

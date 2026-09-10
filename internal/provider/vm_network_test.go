@@ -44,7 +44,7 @@ resource "cloudless_vm" %q {
 // public interface the VM creates for itself comes up in one apply with no
 // restart pending.
 func TestUnitVMNetwork_PrivateAndOwnedPublicInOneApply(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -99,7 +99,7 @@ resource "cloudless_security_group" "web" {
 // Adding a public interface with an existing IP to a live VM is an in-place
 // update that the provider follows with the restart the API asks for.
 func TestUnitVMNetwork_AddPublicToLiveVMRestartsInPlace(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	var vmID string
 
@@ -182,7 +182,7 @@ resource "cloudless_public_ip" "edge" {
 // Changing the default interface's subnet cannot happen on a live VM and is
 // planned as a replacement.
 func TestUnitVMNetwork_DefaultSubnetChangeReplaces(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -214,7 +214,7 @@ func TestUnitVMNetwork_DefaultSubnetChangeReplaces(t *testing.T) {
 // The API may list interfaces in any order; the state keeps the configured
 // order and an unchanged configuration plans empty.
 func TestUnitVMNetwork_ReorderedInterfacesPlanEmpty(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	cfg := `
 resource "cloudless_public_ip" "edge" {
@@ -308,7 +308,7 @@ func TestUnitVMNetwork_InvalidLayoutsFailAtPlan(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := tfharness.New()
+			h := tfharness.New(t)
 			defer h.Close()
 			resource.UnitTest(t, resource.TestCase{
 				ProtoV6ProviderFactories: h.Factories,
@@ -324,7 +324,7 @@ func TestUnitVMNetwork_InvalidLayoutsFailAtPlan(t *testing.T) {
 
 // Destroying a VM releases the public IP it created for itself.
 func TestUnitVMNetwork_DestroyReleasesOwnedPublicIP(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	var ipID string
 
@@ -361,7 +361,7 @@ func TestUnitVMNetwork_DestroyReleasesOwnedPublicIP(t *testing.T) {
 // place; on another subnet the VM is replaced, because a live default
 // interface cannot be repointed.
 func TestUnitVMNetwork_AdoptBlocksAfterCreate(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	var vmID string
 	base := vmWithNICs("")
