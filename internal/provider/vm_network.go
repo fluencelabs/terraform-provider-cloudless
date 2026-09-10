@@ -461,10 +461,6 @@ func reconcileLiveNICs(ctx context.Context, c *client.Client, vmID string, prev,
 	if err != nil {
 		return false, fmt.Errorf("list interfaces: %w", err)
 	}
-	byKey := map[string]client.VMInterface{}
-	for _, i := range current {
-		byKey[apiNICKey(i)] = i
-	}
 	keys, err := resolveNICKeys(prev, next)
 	if err != nil {
 		return false, err
@@ -474,10 +470,28 @@ func reconcileLiveNICs(ctx context.Context, c *client.Client, vmID string, prev,
 		wanted[k] = true
 	}
 
+	// The repoint goes first and the list is taken again: the moved interface
+	// answers to a different key afterwards, and the rest of the reconcile
+	// matches blocks by key.
+	moved, err := repointDefaultNIC(ctx, c, vmID, current, next)
+	if err != nil {
+		return false, err
+	}
+	if moved {
+		if current, err = c.ListVMInterfaces(ctx, vmID); err != nil {
+			return true, fmt.Errorf("list interfaces after repointing the default: %w", err)
+		}
+	}
+	byKey := map[string]client.VMInterface{}
+	for _, i := range current {
+		byKey[apiNICKey(i)] = i
+	}
+
 	// Removals go first and are waited out, so an address released here is
 	// free for whoever attaches it next (possibly another resource in the
 	// same apply; graph @cloudless/fluence, node #1824).
 	changed, err := removeUnwantedNICs(ctx, c, vmID, current, wanted)
+	changed = changed || moved
 	if err != nil {
 		return changed, err
 	}
@@ -805,9 +819,6 @@ func planNICReplacement(prev, next []vmNICModel) (bool, string) {
 			return true, why
 		}
 	}
-	if defaultNICGone(prev, next) {
-		return true, "the default interface's subnet changed"
-	}
 	return false, ""
 }
 
@@ -850,23 +861,60 @@ func matchedNICChange(p, n vmNICModel) string {
 	return ""
 }
 
-// defaultNICGone reports whether the state's default interface has no
-// counterpart in the plan.
-func defaultNICGone(prev, next []vmNICModel) bool {
-	for _, p := range prev {
-		// Only a private default binds the VM's subnet; the API may also flag a
-		// public interface as default, and that flag travels with the IP.
-		if !nicIsDefault(p) || nicIsPublic(p) {
-			continue
-		}
-		for _, n := range next {
-			if nicKey(n) == nicKey(p) {
-				return false
-			}
-		}
-		return true
+// repointDefaultNIC moves the VM's default interface to the subnet the plan
+// names. A live VM changes its default subnet this way — a PATCH and a
+// restart, not a new VM — as long as the target subnet is in the VM's own
+// cluster; a subnet elsewhere would mean moving the VM, which the API cannot
+// do. Reports whether it moved anything.
+func repointDefaultNIC(
+	ctx context.Context,
+	c *client.Client,
+	vmID string,
+	current []client.VMInterface,
+	next []vmNICModel,
+) (bool, error) {
+	want := plannedDefaultSubnet(next)
+	if want == "" {
+		return false, nil
 	}
-	return false
+	var dflt *client.VMInterface
+	for i := range current {
+		if current[i].Default && !current[i].IsPublic() {
+			dflt = &current[i]
+		}
+	}
+	if dflt == nil || dflt.SubnetID() == want {
+		return false, nil
+	}
+	rerr := retryInterfaceOp(ctx, func(ctx context.Context) error {
+		_, err := c.RepointVMInterface(ctx, vmID, dflt.ID, want)
+		return err
+	})
+	if rerr != nil {
+		return false, fmt.Errorf(
+			"repoint default interface to subnet %s: %w "+
+				"(a subnet in another cluster would mean moving the vm, which needs a replacement: "+
+				"terraform apply -replace)",
+			want, rerr)
+	}
+	return true, nil
+}
+
+// plannedDefaultSubnet names the subnet the plan's default private block
+// binds, or "" when the plan names no such block. `default` is computed, so a
+// freshly written block carries no value and the layout rules name the
+// default instead.
+func plannedDefaultSubnet(nics []vmNICModel) string {
+	dflt, err := validateNICLayout(nics, false)
+	if err != nil || dflt < 0 {
+		return ""
+	}
+	// Only a private default binds the VM's subnet; the API may also flag a
+	// public interface as default, and that flag travels with the IP.
+	if n := nics[dflt]; !nicIsPublic(n) && knownString(n.SubnetID) {
+		return n.SubnetID.ValueString()
+	}
+	return ""
 }
 
 // nicKeysDiffer reports whether the set of interface keys changes between

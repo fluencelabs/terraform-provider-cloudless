@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -595,12 +594,6 @@ func (r *vmResource) ModifyPlan(
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if why := adoptsDefaultElsewhere(state, plan); why != "" {
-		resp.Diagnostics.AddAttributeWarning(path.Root("network_interface"),
-			"VM will be replaced", why+"; a live VM cannot move its default interface.")
-		resp.RequiresReplace = append(resp.RequiresReplace, path.Root("network_interface"))
-		return
-	}
 	if why := newNICsWithStaticIPs(state.NICs, plan.NICs); why != "" {
 		resp.Diagnostics.AddAttributeError(path.Root("network_interface"), "Unsupported network_interface change",
 			why+": the API sets static IPs only while the VM is a draft; create the VM with them or drop static_ips.")
@@ -621,25 +614,6 @@ func (r *vmResource) ModifyPlan(
 		}
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("public_ip_id"), types.StringUnknown())...)
 	}
-}
-
-// adoptsDefaultElsewhere handles a VM created without network_interface
-// blocks that later declares them: the server default interface lives on
-// the VPC's default subnet and can be repointed only while the VM is a
-// draft, so blocks whose default lands elsewhere mean a new VM.
-func adoptsDefaultElsewhere(state, plan vmModel) string {
-	if len(state.NICs) != 0 || len(plan.NICs) == 0 {
-		return ""
-	}
-	dflt, err := validateNICLayout(plan.NICs, false)
-	if err != nil || dflt < 0 {
-		return ""
-	}
-	want := plan.NICs[dflt].SubnetID.ValueString()
-	if slices.Contains(stringsFromList(state.Subnets), want) {
-		return ""
-	}
-	return "network_interface declares a default subnet the VM was not created with"
 }
 
 // fillMinimal records a VM whose state could not be read after provision:

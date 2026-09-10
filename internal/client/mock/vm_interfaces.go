@@ -258,7 +258,19 @@ func (s *Server) updateVMInterfaceV3(w http.ResponseWriter, r *http.Request, rec
 				)
 				return
 			}
+			// A live VM stays in its cluster: a repoint to a subnet
+			// elsewhere is refused, a repoint within the cluster is just a
+			// restart.
+			if sn, known := s.subnetMap[*body.Subnet]; known && sn.ClusterID != rec.ClusterID {
+				s.writeJSON(
+					w,
+					http.StatusUnprocessableEntity,
+					map[string]string{"error": "subnet is in another cluster", "code": "unprocessable_entity"},
+				)
+				return
+			}
 			ni.Subnet = *body.Subnet
+			rec.RestartRequired = true
 		case body.Kind != nil && rec.Status != draftStatus:
 			s.writeJSON(
 				w,

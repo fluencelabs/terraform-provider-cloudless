@@ -181,9 +181,10 @@ resource "cloudless_public_ip" "edge" {
 
 // Changing the default interface's subnet cannot happen on a live VM and is
 // planned as a replacement.
-func TestUnitVMNetwork_DefaultSubnetChangeReplaces(t *testing.T) {
+func TestUnitVMNetwork_DefaultSubnetChangesInPlace(t *testing.T) {
 	h := tfharness.New(t)
 	defer h.Close()
+	var vmID string
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: h.Factories,
@@ -193,8 +194,11 @@ func TestUnitVMNetwork_DefaultSubnetChangeReplaces(t *testing.T) {
     type      = "private"
     subnet_id = "` + nicTestSubnet + `"
   }
-`)},
+`),
+				Check: captureID("cloudless_vm.app", &vmID)},
 			{
+				// The default interface is repointed and the VM restarted;
+				// only a subnet in another cluster would need a new VM.
 				Config: vmWithNICs(`
   network_interface {
     type      = "private"
@@ -203,16 +207,19 @@ func TestUnitVMNetwork_DefaultSubnetChangeReplaces(t *testing.T) {
 `),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("cloudless_vm.app", plancheck.ResourceActionReplace),
+						plancheck.ExpectResourceAction("cloudless_vm.app", plancheck.ResourceActionUpdate),
 					},
 				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					requireSameID("cloudless_vm.app", &vmID),
+					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.0.subnet_id", nicTestSubnet2),
+					resource.TestCheckResourceAttr("cloudless_vm.app", "subnet_ids.0", nicTestSubnet2),
+				),
 			},
 		},
 	})
 }
 
-// The API may list interfaces in any order; the state keeps the configured
-// order and an unchanged configuration plans empty.
 func TestUnitVMNetwork_ReorderedInterfacesPlanEmpty(t *testing.T) {
 	h := tfharness.New(t)
 	defer h.Close()
@@ -395,7 +402,8 @@ func TestUnitVMNetwork_AdoptBlocksAfterCreate(t *testing.T) {
 				),
 			},
 			{
-				// A different default subnet: the VM is replaced.
+				// A different default subnet in the same cluster: repointed
+				// on the same VM.
 				Config: vmWithNICs(`
   network_interface {
     type      = "private"
@@ -404,9 +412,13 @@ func TestUnitVMNetwork_AdoptBlocksAfterCreate(t *testing.T) {
 `),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("cloudless_vm.app", plancheck.ResourceActionReplace),
+						plancheck.ExpectResourceAction("cloudless_vm.app", plancheck.ResourceActionUpdate),
 					},
 				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					requireSameID("cloudless_vm.app", &vmID),
+					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.0.subnet_id", nicTestSubnet2),
+				),
 			},
 		},
 	})
