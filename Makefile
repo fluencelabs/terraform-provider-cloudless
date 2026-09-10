@@ -18,6 +18,7 @@ fmt-check:
 
 # Regenerates docs/ and fails if the result differs from what is committed.
 docs-check: docs
+	@git add -N -- docs/ >/dev/null 2>&1 || true
 	@git diff --exit-code -- docs/ || { echo "docs/ is stale — run 'make docs' and commit the result"; exit 1; }
 
 build:
