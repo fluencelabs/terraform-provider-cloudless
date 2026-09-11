@@ -4,8 +4,10 @@ package acctest
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -90,16 +92,25 @@ func DefaultNetwork(t *testing.T) (string, string) {
 // probe VPC is deleted again when the key turns out to be allowed.
 func SkipUnlessVPCWrite(t *testing.T, clusterID string) {
 	t.Helper()
-	// Probe with a body the handler rejects (empty name): the permission check
-	// runs first, so 403 means "no vpc:write" and 400 means the scope is
-	// there — without creating a VPC on the shared stage account.
-	_, err := RealClient().CreateVPC(context.Background(), client.CreateVPCRequest{ClusterID: clusterID, Name: ""})
-	switch {
-	case client.IsForbidden(err):
-		t.Skip("API key lacks vpc:write (vodopad refuses it on keys); VPC and subnet resources cannot be exercised")
-	case err == nil:
-		t.Fatalf("scope probe unexpectedly created a VPC (empty name, cluster %s); delete it by hand", clusterID)
+	// The probe creates a real VPC and deletes it again: body validation runs
+	// before the permission check on this route, so a deliberately invalid
+	// body answers 400 whether or not the key may write, and cannot tell the
+	// two apart (observed on stage 2026-09-11).
+	ctx := context.Background()
+	name := fmt.Sprintf("tf-acc-probe-%d", time.Now().UnixNano()%1e9)
+	vpc, err := RealClient().CreateVPC(ctx, client.CreateVPCRequest{ClusterID: clusterID, Name: name})
+	if client.IsForbidden(err) {
+		t.Skip("API key lacks vpc:write (reissue the stage key with vpc:write and subnet:write); " +
+			"VPC and subnet resources cannot be exercised")
 	}
+	if err != nil {
+		t.Fatalf("vpc:write probe: %v", err)
+	}
+	t.Cleanup(func() {
+		if derr := RealClient().DeleteVPC(context.Background(), vpc.ID); derr != nil {
+			t.Logf("probe VPC %s (%s) left behind: %v", vpc.ID, name, derr)
+		}
+	})
 }
 
 // FirstClusterID returns the first cluster the account can see.
