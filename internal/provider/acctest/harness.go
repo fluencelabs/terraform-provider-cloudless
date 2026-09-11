@@ -88,6 +88,9 @@ func DefaultNetwork(t *testing.T) (string, string) {
 	return pick.VPCID, pick.ID
 }
 
+// probeNameSuffixMod keeps the probe VPC's name inside the 25-character limit.
+const probeNameSuffixMod = 1_000_000_000
+
 // SkipUnlessVPCWrite skips the test when the key cannot create VPCs. The
 // probe VPC is deleted again when the key turns out to be allowed.
 func SkipUnlessVPCWrite(t *testing.T, clusterID string) {
@@ -97,7 +100,7 @@ func SkipUnlessVPCWrite(t *testing.T, clusterID string) {
 	// body answers 400 whether or not the key may write, and cannot tell the
 	// two apart (observed on stage 2026-09-11).
 	ctx := context.Background()
-	name := fmt.Sprintf("tf-acc-probe-%d", time.Now().UnixNano()%1e9)
+	name := fmt.Sprintf("tf-acc-probe-%d", time.Now().UnixNano()%probeNameSuffixMod)
 	vpc, err := RealClient().CreateVPC(ctx, client.CreateVPCRequest{ClusterID: clusterID, Name: name})
 	if client.IsForbidden(err) {
 		t.Skip("API key lacks vpc:write (reissue the stage key with vpc:write and subnet:write); " +
