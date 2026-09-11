@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -68,7 +69,7 @@ func (r *subnetResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.RequiresReplaceIfConfigured(),
 					stringplanmodifier.UseStateForUnknown(),
 				},
-				Description: "Optional IPv4 CIDR (e.g. 10.0.0.0/24).",
+				Description: "IPv4 CIDR (e.g. 10.0.0.0/24). A subnet needs at least one of ipv4_cidr and ipv6_cidr.",
 				Validators:  []validator.String{validators.CIDR("ipv4")},
 			},
 			"ipv6_cidr": schema.StringAttribute{
@@ -78,12 +79,21 @@ func (r *subnetResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.RequiresReplaceIfConfigured(),
 					stringplanmodifier.UseStateForUnknown(),
 				},
-				Description: "Optional IPv6 CIDR (e.g. 2001:db8::/64).",
+				Description: "IPv6 CIDR (e.g. 2001:db8::/64). A subnet needs at least one of ipv4_cidr and ipv6_cidr.",
 				Validators:  []validator.String{validators.CIDR("ipv6")},
 			},
 			"status":  schema.StringAttribute{Computed: true},
 			"user_id": schema.StringAttribute{Computed: true},
 		},
+	}
+}
+
+// ConfigValidators pins what the API requires and the public spec does not
+// say: a subnet is created with at least one CIDR (observed on stage
+// 2026-09-11: a create with neither answers 400 "No one cidr provided").
+func (r *subnetResource) ConfigValidators(_ context.Context) []resource.ConfigValidator {
+	return []resource.ConfigValidator{
+		resourcevalidator.AtLeastOneOf(path.MatchRoot("ipv4_cidr"), path.MatchRoot("ipv6_cidr")),
 	}
 }
 

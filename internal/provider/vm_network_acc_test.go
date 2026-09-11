@@ -130,3 +130,85 @@ resource "cloudless_vm" "app" {
 		},
 	})
 }
+
+// The observation behind the in-place default-subnet change: a live VM's
+// default interface is repointed to another subnet in the same cluster with a
+// PATCH and a restart, not by building a new VM.
+func TestAccVMNetwork_DefaultSubnetRepoint(t *testing.T) {
+	factories := acctest.Setup(t)
+	acctest.SkipUnlessVPCWrite(t, acctest.FirstClusterID(t))
+	suffix := tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
+	var vmID string
+
+	cfg := func(subnet string) string {
+		return fmt.Sprintf(`
+data "cloudless_clusters" "all" {}
+
+locals {
+  cluster_id = data.cloudless_clusters.all.clusters[0].id
+}
+
+data "cloudless_vm_configurations" "all" {}
+
+data "cloudless_default_images" "all" {}
+
+resource "cloudless_vpc" "main" {
+  cluster_id = local.cluster_id
+  name       = "tf-acc-vpc-%[1]s"
+}
+
+resource "cloudless_subnet" "a" {
+  vpc_id    = cloudless_vpc.main.id
+  name      = "tf-acc-sn-a-%[1]s"
+  ipv4_cidr = "10.43.0.0/24"
+}
+
+resource "cloudless_subnet" "b" {
+  vpc_id    = cloudless_vpc.main.id
+  name      = "tf-acc-sn-b-%[1]s"
+  ipv4_cidr = "10.43.1.0/24"
+}
+
+resource "cloudless_vm" "app" {
+  cluster_id       = local.cluster_id
+  name             = "tf-acc-vm-%[1]s"
+  configuration_id = data.cloudless_vm_configurations.all.configurations[0].id
+
+  boot_disk {
+    volume_gb = 40
+    image_id  = [for i in data.cloudless_default_images.all.images : i.id if i.slug == "ubuntu-24-04-x64"][0]
+  }
+
+  network_interface {
+    type      = "private"
+    subnet_id = %[2]s
+  }
+}
+`, suffix, subnet)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: factories,
+		CheckDestroy:             vmDestroy(),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg("cloudless_subnet.a.id"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("cloudless_vm.app", "status", "launched"),
+					captureID("cloudless_vm.app", &vmID),
+				),
+			},
+			{
+				Config: cfg("cloudless_subnet.b.id"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					requireSameID("cloudless_vm.app", &vmID),
+					resource.TestCheckResourceAttr("cloudless_vm.app", "status", "launched"),
+					resource.TestCheckResourceAttrPair(
+						"cloudless_vm.app", "network_interface.0.subnet_id",
+						"cloudless_subnet.b", "id",
+					),
+				),
+			},
+		},
+	})
+}

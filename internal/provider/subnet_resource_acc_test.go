@@ -48,8 +48,9 @@ resource "cloudless_vpc" "main" {
 }
 
 resource "cloudless_subnet" "s" {
-  vpc_id = cloudless_vpc.main.id
-  name   = %q
+  vpc_id    = cloudless_vpc.main.id
+  name      = %q
+  ipv4_cidr = "10.42.0.0/24"
 }
 `, vpcName, subnetName),
 				Check: resource.ComposeAggregateTestCheckFunc(

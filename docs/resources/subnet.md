@@ -29,8 +29,8 @@ resource "cloudless_subnet" "private" {
 ### Optional
 
 - `cluster_id` (String) Cluster the subnet lives on. If unset, derived from vpc_id's cluster.
-- `ipv4_cidr` (String) Optional IPv4 CIDR (e.g. 10.0.0.0/24).
-- `ipv6_cidr` (String) Optional IPv6 CIDR (e.g. 2001:db8::/64).
+- `ipv4_cidr` (String) IPv4 CIDR (e.g. 10.0.0.0/24). A subnet needs at least one of ipv4_cidr and ipv6_cidr.
+- `ipv6_cidr` (String) IPv6 CIDR (e.g. 2001:db8::/64). A subnet needs at least one of ipv4_cidr and ipv6_cidr.
 
 ### Read-Only
 

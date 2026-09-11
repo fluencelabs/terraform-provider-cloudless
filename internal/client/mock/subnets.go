@@ -48,6 +48,13 @@ func (s *Server) handleSubnetCreate(w http.ResponseWriter, r *http.Request) {
 		IPv6Cidr *string `json:"ipv6Cidr,omitempty"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	// A subnet needs at least one CIDR; the public spec marks both nullable,
+	// the API does not (observed on stage 2026-09-11).
+	if body.IPv4Cidr == nil && body.IPv6Cidr == nil {
+		s.writeJSON(w, http.StatusBadRequest,
+			map[string]string{"error": "No one cidr provided", "code": "bad_request"})
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := newID()
