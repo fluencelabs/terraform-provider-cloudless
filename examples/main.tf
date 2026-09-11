@@ -10,15 +10,26 @@ provider "cloudless" {
   # api_key is read from FLUENCE_API_KEY when omitted
 }
 
-# Browse what's on the marketplace before referencing IDs.
-data "cloudless_clusters" "all" {}
-data "cloudless_vm_configurations" "all" {}
-data "cloudless_default_images" "all" {}
+# Name what you want; the plural data sources (cloudless_clusters,
+# cloudless_vm_configurations, cloudless_default_images) are for browsing the
+# catalog when you do not yet know what to ask for.
+data "cloudless_cluster" "main" {
+  region = "DE"
+}
+
+data "cloudless_vm_configuration" "small" {
+  vcpu   = 2
+  ram_gb = 4
+}
+
+data "cloudless_default_image" "ubuntu" {
+  slug = "ubuntu-24-04-x64"
+}
 
 locals {
-  cluster_id      = data.cloudless_clusters.all.clusters[0].id
-  small_config_id = [for c in data.cloudless_vm_configurations.all.configurations : c.id if c.vcpu == 2][0]
-  ubuntu_image    = [for i in data.cloudless_default_images.all.images : i.download_url if i.slug == "ubuntu-24-04-x64"][0]
+  cluster_id      = data.cloudless_cluster.main.id
+  small_config_id = data.cloudless_vm_configuration.small.id
+  ubuntu_image    = data.cloudless_default_image.ubuntu.download_url
 }
 
 resource "cloudless_ssh_key" "me" {

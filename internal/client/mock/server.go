@@ -40,6 +40,7 @@ type Server struct {
 	subnetMap         map[string]*subnetRecord
 	subnetWiringOnce  sync.Once
 	clusterMap        map[string]map[string]any
+	catalogsWiring    sync.Once
 	clustersWiring    sync.Once
 	dcMap             map[string]map[string]any
 	datacentersWiring sync.Once
@@ -116,6 +117,7 @@ func New() *Server {
 	s.Server = httptest.NewServer(s.contractMiddleware(s.mux))
 	s.wireVPCsOnce()
 	s.wireSubnetsOnce()
+	s.wireCatalogsOnce()
 	s.wireClustersOnce()
 	s.wireDCsOnce()
 	s.wireSGsOnce()

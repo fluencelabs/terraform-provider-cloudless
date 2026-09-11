@@ -3,12 +3,12 @@
 resource "cloudless_vm" "web" {
   cluster_id       = data.cloudless_cluster.main.id
   name             = "web"
-  configuration_id = data.cloudless_vm_configurations.all.configurations[0].id
+  configuration_id = data.cloudless_vm_configuration.small.id
   ssh_key_ids      = [cloudless_ssh_key.me.id]
 
   boot_disk {
     volume_gb = 40
-    image_id  = [for i in data.cloudless_default_images.all.images : i.id if i.slug == "ubuntu-24-04-x64"][0]
+    image_id  = data.cloudless_default_image.ubuntu.id
   }
 
   network_interface {
@@ -30,7 +30,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = data.cloudless_default_images.all.images[0].download_url
+  os_image     = data.cloudless_default_image.ubuntu.download_url
 }
 
 resource "cloudless_public_ip" "app" {
@@ -42,7 +42,7 @@ resource "cloudless_public_ip" "app" {
 resource "cloudless_vm" "app" {
   cluster_id       = data.cloudless_cluster.main.id
   name             = "app"
-  configuration_id = data.cloudless_vm_configurations.all.configurations[0].id
+  configuration_id = data.cloudless_vm_configuration.small.id
   ssh_key_ids      = [cloudless_ssh_key.me.id]
 
   boot_disk { storage_id = cloudless_storage.boot.id }

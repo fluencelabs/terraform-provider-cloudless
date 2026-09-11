@@ -439,3 +439,19 @@ func resolveClusterID(
 
 	return vpc.ClusterID
 }
+
+// exactlyOne reports whether a singular data source found its one match, and
+// otherwise says which way it failed: nothing to pick, or too much to pick
+// from — with the candidates named, since narrowing needs to know them.
+func exactlyOne(n int, what string, names []string, diags *diag.Diagnostics) bool {
+	switch n {
+	case 1:
+		return true
+	case 0:
+		diags.AddError("No matching "+what, "no "+what+" matched the supplied filters")
+	default:
+		diags.AddError("Ambiguous "+what+" filter",
+			"more than one "+what+" matches; narrow the filter. matches: "+joinComma(names))
+	}
+	return false
+}
