@@ -10,6 +10,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -49,10 +51,12 @@ func networkInterfaceBlock() schema.ListNestedBlock {
 	return schema.ListNestedBlock{
 		Description: "Network interfaces of the VM. type = \"private\" binds a subnet (subnet_id); type = \"public\" attaches " +
 			"an existing cloudless_public_ip (public_ip_id) or, when public_ip_id is omitted, makes the VM create and own a " +
-			"public IP of address_type that is released on destroy. Exactly one private interface is the default; omit the " +
-			"blocks entirely to keep the server default (the VPC's default subnet). Interfaces are assembled before the VM " +
-			"is provisioned, so no restart is needed. On a live VM interfaces can be added and removed and their security " +
-			"group changed; changing a subnet, static IPs, the default, or a VM-owned public IP forces a new VM.",
+			"public IP of address_type that is released on destroy. Exactly one private interface is the default, and it may " +
+			"leave subnet_id out to stay on the cluster's default subnet — so a VM needs no VPC or subnet of its own. Omit " +
+			"the blocks entirely and the network is left to the API. Interfaces are assembled before the VM is provisioned, " +
+			"so no restart is needed. On a live VM interfaces can be added and removed, their security group changed, and " +
+			"the default interface repointed to another subnet of the same cluster (a restart, not a new VM); changing " +
+			"static_ips or a VM-owned public IP forces a new VM.",
 		NestedObject: schema.NestedBlockObject{
 			Attributes: map[string]schema.Attribute{
 				"id": schema.StringAttribute{Computed: true},
@@ -62,9 +66,11 @@ func networkInterfaceBlock() schema.ListNestedBlock {
 					Validators:  []validator.String{stringvalidator.OneOf(nicTypePrivate, nicTypePublic)},
 				},
 				"subnet_id": schema.StringAttribute{
-					Optional:    true,
-					Description: "Subnet of a private interface. Required for type = \"private\".",
-					Validators:  []validator.String{validators.UUID()},
+					Optional: true, Computed: true,
+					PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+					Description: "Subnet of a private interface. The default interface may omit it — the VM then keeps " +
+						"the cluster's default subnet and its id is computed here; every other private interface names one.",
+					Validators: []validator.String{validators.UUID()},
 				},
 				"public_ip_id": schema.StringAttribute{
 					Optional: true, Computed: true,
@@ -153,6 +159,11 @@ func nicKey(n vmNICModel) string {
 		}
 		return "pub:new"
 	}
+	if !knownString(n.SubnetID) {
+		// The default interface with no subnet named: whatever subnet the API
+		// gave it is the one it is on.
+		return "prv:default"
+	}
 	return "prv:" + n.SubnetID.ValueString()
 }
 
@@ -206,6 +217,9 @@ func validateNICLayout(nics []vmNICModel, checkDefault bool) (int, error) {
 	if public > 1 {
 		return -1, errors.New("network_interface: a VM can have only one public interface")
 	}
+	if err := noteUnboundPrivate(nics); err != nil {
+		return -1, err
+	}
 	if dflt < 0 {
 		dflt = firstPrivate
 	}
@@ -230,6 +244,37 @@ func noteSubnet(subnets map[string]int, i int, n vmNICModel, private bool) error
 		)
 	}
 	subnets[n.SubnetID.ValueString()] = i
+	return nil
+}
+
+// noteUnboundPrivate allows exactly one private block to omit subnet_id: that
+// one keeps the cluster's default subnet, which the API assigns. A second
+// interface has no such default to fall back on, and two unbound blocks could
+// not be told apart.
+func noteUnboundPrivate(nics []vmNICModel) error {
+	unbound := -1
+	for i, n := range nics {
+		if nicIsPublic(n) || knownString(n.SubnetID) || n.SubnetID.IsUnknown() {
+			continue
+		}
+		if unbound >= 0 {
+			return fmt.Errorf(
+				"network_interface[%d] and [%d] both omit subnet_id; only the default interface may", unbound, i,
+			)
+		}
+		unbound = i
+	}
+	if unbound < 0 {
+		return nil
+	}
+	for i, n := range nics {
+		if i != unbound && nicIsDefault(n) {
+			return fmt.Errorf(
+				"network_interface[%d] omits subnet_id but network_interface[%d] is the default; "+
+					"only the default interface may omit it", unbound, i,
+			)
+		}
+	}
 	return nil
 }
 
@@ -258,9 +303,6 @@ func validateNIC(i int, n vmNICModel) (bool, error) {
 	hasStatic := !n.StaticIPs.IsNull() && !n.StaticIPs.IsUnknown() && len(n.StaticIPs.Elements()) > 0
 	switch n.Type.ValueString() {
 	case nicTypePrivate:
-		if !hasSubnet && !n.SubnetID.IsUnknown() {
-			return false, fmt.Errorf("network_interface[%d]: a private interface needs subnet_id", i)
-		}
 		if knownString(n.PublicIPID) || knownString(n.AddressType) {
 			return false, fmt.Errorf(
 				"network_interface[%d]: public_ip_id and address_type apply to public interfaces only",
@@ -341,8 +383,10 @@ func bindDraftDefaultNIC(ctx context.Context, c *client.Client, vmID string, dfl
 	if serverDefault == nil {
 		return errors.New("draft has no default interface")
 	}
+	// A default block without subnet_id keeps whatever subnet the API gave
+	// the draft — that is the point of leaving it out.
 	want := dflt.SubnetID.ValueString()
-	if serverDefault.SubnetID() != want {
+	if knownString(dflt.SubnetID) && serverDefault.SubnetID() != want {
 		if _, rerr := c.RepointVMInterface(ctx, vmID, serverDefault.ID, want); rerr != nil {
 			return fmt.Errorf("bind default interface to subnet %s: %w", want, rerr)
 		}
@@ -730,6 +774,15 @@ func matchNIC(p vmNICModel, ifaces []client.VMInterface, used []bool) int {
 	if nicOwnsIP(p) {
 		for i, f := range ifaces {
 			if !used[i] && f.IsPublic() {
+				return i
+			}
+		}
+	}
+	if !nicIsPublic(p) && !knownString(p.SubnetID) {
+		// A private block that named no subnet is the default one: it belongs
+		// to whichever interface the API marks as the VM's default.
+		for i, f := range ifaces {
+			if !used[i] && !f.IsPublic() && f.Default {
 				return i
 			}
 		}

@@ -307,11 +307,24 @@ func TestUnitVMNetwork_InvalidLayoutsFailAtPlan(t *testing.T) {
     address_type = "V4"
   }
 `, "address_type applies only to a VM-created IP"},
-		{"private without subnet", `
+		{"two private blocks without subnet", `
   network_interface {
     type = "private"
   }
-`, "needs subnet_id"},
+  network_interface {
+    type = "private"
+  }
+`, "both omit subnet_id"},
+		{"unbound private beside another default", `
+  network_interface {
+    type = "private"
+  }
+  network_interface {
+    type      = "private"
+    subnet_id = "` + nicTestSubnet + `"
+    default   = true
+  }
+`, "omits subnet_id but network_interface"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -419,6 +432,41 @@ func TestUnitVMNetwork_AdoptBlocksAfterCreate(t *testing.T) {
 					requireSameID("cloudless_vm.app", &vmID),
 					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.0.subnet_id", nicTestSubnet2),
 				),
+			},
+		},
+	})
+}
+
+// The default interface may leave subnet_id out: the VM keeps the cluster's
+// default subnet and the id it landed on is computed into state.
+func TestUnitVMNetwork_DefaultSubnetMayBeOmitted(t *testing.T) {
+	h := tfharness.New(t)
+	defer h.Close()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: h.Factories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmWithNICs(`
+  network_interface {
+    type = "private"
+  }
+
+  network_interface {
+    type = "public"
+  }
+`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.#", "2"),
+					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.0.default", "true"),
+					resource.TestCheckResourceAttr(
+						"cloudless_vm.app", "network_interface.0.subnet_id", mockDefaultSubnet),
+				),
+			},
+			{
+				// The computed subnet does not come back as a diff.
+				Config:   vmWithNICs("\n  network_interface {\n    type = \"private\"\n  }\n\n  network_interface {\n    type = \"public\"\n  }\n"),
+				PlanOnly: true,
 			},
 		},
 	})

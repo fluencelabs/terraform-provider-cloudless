@@ -85,7 +85,7 @@ resource "cloudless_vm" "app" {
 
 - `boot_disk` (Block, Optional) Boot disk: either reference an existing storage_id, or supply volume_gb + image_id (+ name) to create one from the image catalog while the VM is a draft. The boot disk cannot be changed in place; any modification forces a new VM. (see [below for nested schema](#nestedblock--boot_disk))
 - `data_disk_ids` (List of String) IDs of data storage volumes to attach. Add/remove via the smart Update path; not a force-replace.
-- `network_interface` (Block List) Network interfaces of the VM. type = "private" binds a subnet (subnet_id); type = "public" attaches an existing cloudless_public_ip (public_ip_id) or, when public_ip_id is omitted, makes the VM create and own a public IP of address_type that is released on destroy. Exactly one private interface is the default; omit the blocks entirely to keep the server default (the VPC's default subnet). Interfaces are assembled before the VM is provisioned, so no restart is needed. On a live VM interfaces can be added and removed and their security group changed; changing a subnet, static IPs, the default, or a VM-owned public IP forces a new VM. (see [below for nested schema](#nestedblock--network_interface))
+- `network_interface` (Block List) Network interfaces of the VM. type = "private" binds a subnet (subnet_id); type = "public" attaches an existing cloudless_public_ip (public_ip_id) or, when public_ip_id is omitted, makes the VM create and own a public IP of address_type that is released on destroy. Exactly one private interface is the default, and it may leave subnet_id out to stay on the cluster's default subnet — so a VM needs no VPC or subnet of its own. Omit the blocks entirely and the network is left to the API. Interfaces are assembled before the VM is provisioned, so no restart is needed. On a live VM interfaces can be added and removed, their security group changed, and the default interface repointed to another subnet of the same cluster (a restart, not a new VM); changing static_ips or a VM-owned public IP forces a new VM. (see [below for nested schema](#nestedblock--network_interface))
 - `ssh_key_ids` (List of String) SSH keys to install at first boot. Changing this forces a new VM — Fluence applies SSH keys at create time only.
 
 ### Read-Only
@@ -126,7 +126,7 @@ Optional:
 - `public_ip_id` (String) Existing public IP to attach (type = "public"). Omit to let the VM create its own; the created IP's id is then computed here.
 - `security_group_id` (String) Security group bound to this interface; must belong to the VM's VPC. Removing it unbinds the group.
 - `static_ips` (List of String) Static private IPs for a private interface (at most one per IP version, inside the subnet CIDR). Set only while the VM is created.
-- `subnet_id` (String) Subnet of a private interface. Required for type = "private".
+- `subnet_id` (String) Subnet of a private interface. The default interface may omit it — the VM then keeps the cluster's default subnet and its id is computed here; every other private interface names one.
 
 Read-Only:
 
