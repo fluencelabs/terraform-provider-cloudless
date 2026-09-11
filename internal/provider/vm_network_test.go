@@ -70,17 +70,36 @@ resource "cloudless_security_group" "web" {
 				resource.TestCheckResourceAttr("cloudless_vm.app", "status", "launched"),
 				resource.TestCheckResourceAttr("cloudless_vm.app", "restart_required", "false"),
 				resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.#", "2"),
-				resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.0.default", "true"),
-				resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.0.subnet_id", nicTestSubnet),
+				resource.TestCheckResourceAttr(
+					"cloudless_vm.app",
+					"network_interface.0.default",
+					"true",
+				),
+				resource.TestCheckResourceAttr(
+					"cloudless_vm.app",
+					"network_interface.0.subnet_id",
+					nicTestSubnet,
+				),
 				resource.TestCheckResourceAttrPair(
 					"cloudless_vm.app",
 					"network_interface.0.security_group_id",
 					"cloudless_security_group.web",
 					"id",
 				),
-				resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.0.static_ips.0", "10.0.0.5"),
-				resource.TestCheckResourceAttrSet("cloudless_vm.app", "network_interface.1.public_ip_id"),
-				resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.1.address_type", "V4"),
+				resource.TestCheckResourceAttr(
+					"cloudless_vm.app",
+					"network_interface.0.static_ips.0",
+					"10.0.0.5",
+				),
+				resource.TestCheckResourceAttrSet(
+					"cloudless_vm.app",
+					"network_interface.1.public_ip_id",
+				),
+				resource.TestCheckResourceAttr(
+					"cloudless_vm.app",
+					"network_interface.1.address_type",
+					"V4",
+				),
 				resource.TestCheckResourceAttrPair(
 					"cloudless_vm.app",
 					"public_ip_id",
@@ -92,7 +111,10 @@ resource "cloudless_security_group" "web" {
 		}},
 	})
 	if got := h.Mock.RestartCount(); got != 0 {
-		t.Fatalf("assembling the network on the draft must not restart the VM, got %d restarts", got)
+		t.Fatalf(
+			"assembling the network on the draft must not restart the VM, got %d restarts",
+			got,
+		)
 	}
 }
 
@@ -137,7 +159,10 @@ resource "cloudless_public_ip" "edge" {
 `),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("cloudless_vm.app", plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction(
+							"cloudless_vm.app",
+							plancheck.ResourceActionUpdate,
+						),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -175,7 +200,10 @@ resource "cloudless_public_ip" "edge" {
 	// Observed on stage: attaching a reserved IP applies immediately, only
 	// removing an interface flags restart_required.
 	if got := h.Mock.RestartCount(); got != 1 {
-		t.Fatalf("detaching on a live VM should restart it once, attaching not at all; got %d restarts", got)
+		t.Fatalf(
+			"detaching on a live VM should restart it once, attaching not at all; got %d restarts",
+			got,
+		)
 	}
 }
 
@@ -207,13 +235,24 @@ func TestUnitVMNetwork_DefaultSubnetChangesInPlace(t *testing.T) {
 `),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("cloudless_vm.app", plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction(
+							"cloudless_vm.app",
+							plancheck.ResourceActionUpdate,
+						),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					requireSameID("cloudless_vm.app", &vmID),
-					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.0.subnet_id", nicTestSubnet2),
-					resource.TestCheckResourceAttr("cloudless_vm.app", "subnet_ids.0", nicTestSubnet2),
+					resource.TestCheckResourceAttr(
+						"cloudless_vm.app",
+						"network_interface.0.subnet_id",
+						nicTestSubnet2,
+					),
+					resource.TestCheckResourceAttr(
+						"cloudless_vm.app",
+						"subnet_ids.0",
+						nicTestSubnet2,
+					),
 				),
 			},
 		},
@@ -406,7 +445,10 @@ func TestUnitVMNetwork_AdoptBlocksAfterCreate(t *testing.T) {
 `),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("cloudless_vm.app", plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction(
+							"cloudless_vm.app",
+							plancheck.ResourceActionUpdate,
+						),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -425,12 +467,19 @@ func TestUnitVMNetwork_AdoptBlocksAfterCreate(t *testing.T) {
 `),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("cloudless_vm.app", plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction(
+							"cloudless_vm.app",
+							plancheck.ResourceActionUpdate,
+						),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					requireSameID("cloudless_vm.app", &vmID),
-					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.0.subnet_id", nicTestSubnet2),
+					resource.TestCheckResourceAttr(
+						"cloudless_vm.app",
+						"network_interface.0.subnet_id",
+						nicTestSubnet2,
+					),
 				),
 			},
 		},
@@ -458,14 +507,20 @@ func TestUnitVMNetwork_DefaultSubnetMayBeOmitted(t *testing.T) {
 `),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.#", "2"),
-					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.0.default", "true"),
+					resource.TestCheckResourceAttr(
+						"cloudless_vm.app",
+						"network_interface.0.default",
+						"true",
+					),
 					resource.TestCheckResourceAttr(
 						"cloudless_vm.app", "network_interface.0.subnet_id", mockDefaultSubnet),
 				),
 			},
 			{
 				// The computed subnet does not come back as a diff.
-				Config:   vmWithNICs("\n  network_interface {\n    type = \"private\"\n  }\n\n  network_interface {\n    type = \"public\"\n  }\n"),
+				Config: vmWithNICs(
+					"\n  network_interface {\n    type = \"private\"\n  }\n\n  network_interface {\n    type = \"public\"\n  }\n",
+				),
 				PlanOnly: true,
 			},
 		},

@@ -771,20 +771,22 @@ func matchNIC(p vmNICModel, ifaces []client.VMInterface, used []bool) int {
 			return i
 		}
 	}
-	if nicOwnsIP(p) {
-		for i, f := range ifaces {
-			if !used[i] && f.IsPublic() {
-				return i
-			}
-		}
+	// A VM-owned IP has no id to match on before the API reports it; a private
+	// block that named no subnet is the default one and belongs to whichever
+	// interface the API marks as the VM's default.
+	switch {
+	case nicOwnsIP(p):
+		return firstUnused(ifaces, used, func(f client.VMInterface) bool { return f.IsPublic() })
+	case !nicIsPublic(p) && !knownString(p.SubnetID):
+		return firstUnused(ifaces, used, func(f client.VMInterface) bool { return !f.IsPublic() && f.Default })
 	}
-	if !nicIsPublic(p) && !knownString(p.SubnetID) {
-		// A private block that named no subnet is the default one: it belongs
-		// to whichever interface the API marks as the VM's default.
-		for i, f := range ifaces {
-			if !used[i] && !f.IsPublic() && f.Default {
-				return i
-			}
+	return -1
+}
+
+func firstUnused(ifaces []client.VMInterface, used []bool, ok func(client.VMInterface) bool) int {
+	for i, f := range ifaces {
+		if !used[i] && ok(f) {
+			return i
 		}
 	}
 	return -1
