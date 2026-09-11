@@ -9,15 +9,39 @@ type subnetRecord struct {
 	ID, Name, VPCID, ClusterID, UserID, Status string
 	IPv4, IPv6                                 string
 	Egress                                     bool
+	IsDefault                                  bool
 }
 
 // wireSubnetsOnce is called from New() to register subnet handlers idempotently.
 func (s *Server) wireSubnetsOnce() { s.subnetWiringOnce.Do(s.wireSubnets) }
 
+// The default subnet's VPC and cluster: ids only tests compare against, so
+// they need to be stable, not real.
+const (
+	defaultSubnetVPCID     = "00000000-0000-4000-8000-0000000005a1"
+	defaultSubnetClusterID = "00000000-0000-4000-8000-0000000005c1"
+)
+
 func (s *Server) wireSubnets() {
 	s.mu.Lock()
 	if s.subnetMap == nil {
 		s.subnetMap = map[string]*subnetRecord{}
+	}
+	// Every account has a default subnet per cluster — the one a VM lands on
+	// with no network_interface block; it is the same subnet a fresh draft's
+	// default interface binds.
+	if _, ok := s.subnetMap[defaultDraftSubnetID]; !ok {
+		s.subnetMap[defaultDraftSubnetID] = &subnetRecord{
+			ID:        defaultDraftSubnetID,
+			Name:      "default",
+			VPCID:     defaultSubnetVPCID,
+			ClusterID: defaultSubnetClusterID,
+			UserID:    "test-user",
+			Status:    "ready",
+			IPv4:      "10.0.0.0/24",
+			Egress:    true,
+			IsDefault: true,
+		}
 	}
 	s.mu.Unlock()
 
@@ -131,7 +155,7 @@ func subnetWire(rec *subnetRecord) map[string]any {
 		"userId":    rec.UserID,
 		"status":    rec.Status,
 		"egress":    rec.Egress,
-		"isDefault": false,
+		"isDefault": rec.IsDefault,
 	}
 	if rec.IPv4 != "" {
 		out["ipv4Cidr"] = rec.IPv4

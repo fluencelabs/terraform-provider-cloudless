@@ -351,6 +351,7 @@ type CreateSubnetRequest struct {
 	Name     string  `json:"name"`
 	IPv4CIDR *string `json:"ipv4Cidr,omitempty"`
 	IPv6CIDR *string `json:"ipv6Cidr,omitempty"`
+	Egress   *bool   `json:"egress,omitempty"`
 }
 
 type UpdateSubnetRequest struct {

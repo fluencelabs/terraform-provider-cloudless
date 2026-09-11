@@ -76,7 +76,12 @@ resource "cloudless_vm" "app" {
 				// boot_disk is a configuration-only block; Read populates
 				// boot_disk_id (the computed string) instead. This is a
 				// schema decision, not an API quirk — see vm_resource.fill.
-				ImportStateVerifyIgnore: []string{"boot_disk"},
+				//
+				// network_interface differs on purpose: this VM is declared
+				// without blocks, so its state carries none, while an import
+				// renders every interface the API reports (vmResource.
+				// ImportState) — that is what makes an imported VM adoptable.
+				ImportStateVerifyIgnore: []string{"boot_disk", "network_interface"},
 			},
 		},
 	})

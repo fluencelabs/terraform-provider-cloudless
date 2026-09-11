@@ -56,3 +56,54 @@ resource "cloudless_subnet" "s" {
 		},
 	})
 }
+
+// An IPv6-only subnet with egress left on is refused in the plan: the API
+// answers 422 ipv6_egress_unsupported.
+func TestUnitSubnet_IPv6OnlyNeedsEgressOff(t *testing.T) {
+	h := tfharness.New(t)
+	defer h.Close()
+	h.Mock.SeedVPC("99999999-9999-4999-8999-999999999999", "main", "cluster-X")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: h.Factories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "cloudless_subnet" "s" {
+  vpc_id    = "99999999-9999-4999-8999-999999999999"
+  name      = "demo"
+  ipv6_cidr = "2001:db8::/64"
+}
+`,
+				ExpectError: regexp.MustCompile(`egress`),
+			},
+		},
+	})
+}
+
+// With egress off, the same IPv6-only subnet is created.
+func TestUnitSubnet_IPv6OnlyWithoutEgress(t *testing.T) {
+	h := tfharness.New(t)
+	defer h.Close()
+	h.Mock.SeedVPC("99999999-9999-4999-8999-999999999999", "main", "cluster-X")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: h.Factories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "cloudless_subnet" "s" {
+  vpc_id    = "99999999-9999-4999-8999-999999999999"
+  name      = "demo"
+  ipv6_cidr = "2001:db8::/64"
+  egress    = false
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("cloudless_subnet.s", "egress", "false"),
+					resource.TestCheckResourceAttr("cloudless_subnet.s", "is_default", "false"),
+				),
+			},
+		},
+	})
+}

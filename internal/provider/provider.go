@@ -117,5 +117,6 @@ func (p *cloudlessProvider) DataSources(_ context.Context) []func() datasource.D
 		NewClustersDataSource,
 		NewVMConfigurationsDataSource,
 		NewDefaultImagesDataSource,
+		NewSubnetsDataSource,
 	}
 }
