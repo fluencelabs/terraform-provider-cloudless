@@ -9,8 +9,9 @@ import (
 
 // TestBootDiskToAPI_WireShapes pins the two untagged variants of the /v3
 // boot-disk body: an existing storage is a bare JSON string, an inline create
-// is an object with volumeGb + imageId (+ name). The server matches by shape,
-// so a wrapped or mis-keyed body fails with "did not match any variant".
+// is an object with volumeGb + a tagged source (+ name). The server matches by
+// shape, so a wrapped or mis-keyed body fails with "did not match any
+// variant"; since 0.12.0 an untagged imageId is refused outright.
 func TestBootDiskToAPI_WireShapes(t *testing.T) {
 	const storageID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	const imageID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -33,7 +34,8 @@ func TestBootDiskToAPI_WireShapes(t *testing.T) {
 		t.Fatalf("inline: %v", err)
 	}
 	got, _ := json.Marshal(inline)
-	if want := `{"volumeGb":40,"imageId":"` + imageID + `","name":"boot"}`; string(got) != want {
+	want := `{"volumeGb":40,"source":{"imageId":"` + imageID + `","type":"catalog"},"name":"boot"}`
+	if string(got) != want {
 		t.Errorf("inline boot disk marshaled as %s, want %s", got, want)
 	}
 

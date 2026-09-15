@@ -188,7 +188,7 @@ func bootDiskToAPI(d *vmBootDiskModel) (client.DraftBootDisk, error) {
 	}
 	create := &client.CreateDraftBootDisk{
 		VolumeGb: uint32(d.VolumeGb.ValueInt64()),
-		ImageID:  d.ImageID.ValueString(),
+		Source:   client.CatalogImage(d.ImageID.ValueString()),
 	}
 	if !d.Name.IsNull() && d.Name.ValueString() != "" {
 		n := d.Name.ValueString()

@@ -75,9 +75,14 @@ func (s *Server) handleVMDraftItem(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, "vm not found")
 		return
 	}
-	// Interface routes serve drafts and live VMs alike.
+	// Interface routes serve drafts and live VMs alike, and since 0.12.0 so do
+	// the live lifecycle verbs: /v3 carries restart, softreboot and terminate.
 	if len(parts) >= draftVerbPathParts && parts[3] == interfacesVerb {
 		s.handleVMInterfaceV3(w, r, rec, parts[4:])
+		return
+	}
+	if len(parts) == draftVerbPathParts && r.Method == http.MethodPost && isLiveVMVerb(parts[3]) {
+		s.handleVMVerb(w, r, rec, parts[3])
 		return
 	}
 	if rec.Status != draftStatus {
@@ -113,6 +118,12 @@ func (s *Server) handleVMInterfaceV3(w http.ResponseWriter, r *http.Request, rec
 	default:
 		s.notFound(w, r)
 	}
+}
+
+// isLiveVMVerb names the lifecycle verbs /v3 gained in 0.12.0; they act on a
+// live VM, not on a draft, and /v2 still answers them too.
+func isLiveVMVerb(verb string) bool {
+	return verb == "terminate" || verb == "restart" || verb == "softreboot"
 }
 
 func (s *Server) handleVMDraftVerb(w http.ResponseWriter, r *http.Request, rec *vmRecord, verb string) {
@@ -178,7 +189,8 @@ func (s *Server) moveDraftCluster(w http.ResponseWriter, r *http.Request, rec *v
 }
 
 // replaceDraftBootDisk accepts either a bare storage-ID string (existing Ready
-// disk) or {volumeGb, imageId, name?} (new draft disk from a catalog image).
+// disk) or {volumeGb, source, name?} — the source tagged "catalog" (imageId)
+// or "http" (url); since 0.12.0 an untagged imageId is refused.
 func (s *Server) replaceDraftBootDisk(w http.ResponseWriter, r *http.Request, rec *vmRecord) {
 	var raw json.RawMessage
 	_ = json.NewDecoder(r.Body).Decode(&raw)
@@ -195,11 +207,19 @@ func (s *Server) replaceDraftBootDisk(w http.ResponseWriter, r *http.Request, re
 		return
 	}
 	var create struct {
-		VolumeGb uint32  `json:"volumeGb"`
-		ImageID  string  `json:"imageId"`
-		Name     *string `json:"name"`
+		VolumeGb uint32 `json:"volumeGb"`
+		Source   struct {
+			Type    string `json:"type"`
+			ImageID string `json:"imageId"`
+			URL     string `json:"url"`
+		} `json:"source"`
+		Name *string `json:"name"`
 	}
 	_ = json.Unmarshal(raw, &create)
+	image := create.Source.ImageID
+	if create.Source.Type == "http" {
+		image = create.Source.URL
+	}
 	name := rec.Name + "-boot"
 	if create.Name != nil {
 		name = *create.Name
@@ -208,7 +228,7 @@ func (s *Server) replaceDraftBootDisk(w http.ResponseWriter, r *http.Request, re
 	st := &storageRecord{
 		ID: id, ClusterID: rec.ClusterID, Name: name, StorageType: "NVME",
 		UserID: "test-user", Status: draftStatus, Role: "BOOT",
-		VolumeGb: uint64(create.VolumeGb), OSImage: create.ImageID,
+		VolumeGb: uint64(create.VolumeGb), OSImage: image,
 	}
 	s.storageMap[id] = st
 	rec.BootDisk = id

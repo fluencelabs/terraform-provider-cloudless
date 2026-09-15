@@ -461,8 +461,10 @@ func (c *Client) UpdateVM(ctx context.Context, id string, req UpdateVMRequest) (
 	return &out, nil
 }
 
+// TerminateVM terminates a live VM (POST /v3/vms/{id}/terminate). A draft has
+// never been allocated and is discarded with DeleteVMDraft instead.
 func (c *Client) TerminateVM(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v2/vms/"+id+"/terminate", nil, nil, nil)
+	return c.do(ctx, http.MethodPost, "/v3/vms/"+id+"/terminate", nil, nil, nil)
 }
 
 type vmStoragesBody struct {
@@ -484,12 +486,13 @@ func (c *Client) RemoveVMStorages(ctx context.Context, vmID string, storageIDs [
 	)
 }
 
-// RestartVM hard-restarts a VM (POST /v2/vms/{id}/restart) and returns the
-// updated VM. Operations such as attaching a public IP or security group flag
-// the VM restart_required; the change does not take effect until this restart.
+// RestartVM hard-restarts a live VM (POST /v3/vms/{id}/restart) and returns
+// the updated VM. Operations such as attaching a public IP or security group
+// flag the VM restart_required; the change does not take effect until this
+// restart.
 func (c *Client) RestartVM(ctx context.Context, vmID string) (*VM, error) {
 	var out VM
-	if err := c.do(ctx, http.MethodPost, "/v2/vms/"+vmID+"/restart", nil, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/vms/"+vmID+"/restart", nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

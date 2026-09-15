@@ -76,9 +76,27 @@ type DraftBootDisk struct {
 
 type CreateDraftBootDisk struct {
 	VolumeGb uint32  `json:"volumeGb"`
-	ImageID  string  `json:"imageId"`
+	Source   Source  `json:"source"`
 	Name     *string `json:"name,omitempty"`
 }
+
+// Source is the tagged DraftBootImageSourceRequest: the image comes from the
+// catalog by id, or from an HTTPS URL the cluster imports asynchronously.
+// Since 0.12.0 an untagged imageId is refused.
+type Source struct {
+	ImageID string
+	URL     string
+}
+
+func (s Source) MarshalJSON() ([]byte, error) {
+	if s.URL != "" {
+		return json.Marshal(map[string]string{"type": "http", "url": s.URL})
+	}
+	return json.Marshal(map[string]string{"type": "catalog", "imageId": s.ImageID})
+}
+
+// CatalogImage names a boot image by its catalog id.
+func CatalogImage(id string) Source { return Source{ImageID: id} }
 
 func (b DraftBootDisk) MarshalJSON() ([]byte, error) {
 	if b.StorageID != nil {

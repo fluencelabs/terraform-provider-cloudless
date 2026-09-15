@@ -11,13 +11,12 @@ info:
     \ bodies are JSON.\n\n- Set `Content-Type: application/json` for POST, PUT, and\
     \ PATCH calls.\n- All examples assume the default `Accept: application/json` header.\n\
     \n### Example\n\n```bash\ncurl -X POST https://api.fluence.dev/v1/public_ips \\\
-    \n  -H \"Content-Type: application/json\" \\\n  -H \"Authorization: X-API-KEY\
-    \ <YOUR_API_KEY>\" \\\n  -d '{\n        \"addressType\": \"V4\",\n        \"clusterId\"\
-    : \"3fa85f64-5717-4562-b3fc-2c963f66afa6\",\n        \"name\": \"my-public-ip\"\
-    \n      }'\n```\n\n### HTTP request methods\n\nThe interface responds to different\
-    \ methods depending on the action required.\n\n| Method | Description        \
-    \                                                                            \
-    \    |\n|--------|----------------------------------------------------------------------------------------------------|\n\
+    \n  -H \"Content-Type: application/json\" \\\n  -H \"X-API-KEY: <YOUR_API_KEY>\"\
+    \ \\\n  -d '{\n        \"addressType\": \"V4\",\n        \"clusterId\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\"\
+    ,\n        \"name\": \"my-public-ip\"\n      }'\n```\n\n### HTTP request methods\n\
+    \nThe interface responds to different methods depending on the action required.\n\
+    \n| Method | Description                                                     \
+    \                                   |\n|--------|----------------------------------------------------------------------------------------------------|\n\
     | GET    | Retrieves resource information. These requests are read-only and won't\
     \ modify any resources.       |\n| POST   | Usually used to create new resources.\
     \ Include all required attributes in the request body as JSON. |\n| PATCH  | Update\
@@ -46,9 +45,9 @@ info:
     ```\n\n## Authentication\n\nAll endpoints require a jwt token supplied as a Bearer\
     \ token in the `Authorization` header or an API key provided as the value of the\
     \ `X-API-KEY` header. For example:\n\n```bash\ncurl -H 'Authorization: Bearer\
-    \ my_authentication_token'\n```\n\n```bash\ncurl -H 'Authorization: X-API-KEY\
-    \ my_api_key'\n```\n\n### Managing API Keys\n\nCreate and manage keys in\nthe\
-    \ [Fluence Console › Settings › API Keys](https://console.fluence.network/settings/api-keys).\n\
+    \ my_authentication_token'\n```\n\n```bash\ncurl -H 'X-API-KEY: my_api_key'\n\
+    ```\n\n### Managing API Keys\n\nCreate and manage keys in\nthe [Fluence Console\
+    \ › Settings › API Keys](https://console.fluence.network/settings/api-keys).\n\
     \n- **Read-only keys** – retrieve information only\n- **Full-access keys** – manage\
     \ all resources\n\n> **Important**: API keys are only displayed once during creation\
     \ for security reasons. Store them safely - if a key is\n> lost, expired or compromised,\
@@ -61,34 +60,33 @@ info:
     \ a\n[cloud-init](https://cloudinit.readthedocs.io/) configuration. The payload\
     \ is\nforwarded to the VM backend verbatim; vodopad does not parse or validate\
     \ the\ncontent beyond a 16 KiB byte cap.\n\n```bash\ncurl -X POST https://api.fluence.dev/v2/vms\
-    \ \\\n  -H \"Authorization: X-API-KEY <YOUR_API_KEY>\" \\\n  -H \"Content-Type:\
-    \ application/json\" \\\n  -d '{\n        \"clusterId\": \"...\",\n        \"\
-    name\": \"demo\",\n        \"configurationId\": \"...\",\n        \"bootDisk\"\
-    : { \"...\": \"...\" },\n        \"sshKeys\": [\"...\"],\n        \"cloudInit\"\
-    : {\n          \"userData\": \"#cloud-config\\nruncmd:\\n  - echo hello\\n\"\n\
-    \        }\n      }'\n```\n\nNotes:\n\n- **Create-only.** `userData` is meaningful\
-    \ only on `POST /v2/vms`. `PATCH` requests have no `userData` field; sending one\
-    \ is dropped during JSON deserialization.\n- **Ephemeral.** The content is stored\
-    \ only until the VM transitions to `Launched` (or `Failed` on create-deadline,\
-    \ or `Terminating`/`Terminated` on termination), then erased in the same transaction\
-    \ as the status change. After that, listing or fetching the VM returns a non-null\
-    \ `cloudInit` object (no fields) as a permanent marker but never the original\
-    \ content.\n- **Length limit.** Maximum 16 KiB enforced as a **byte count** (UTF-8\
-    \ multi-byte characters are counted by their byte size, not code-point count).\
-    \ Oversize requests are rejected with `400 Bad Request`.\n- **Privacy.** The content\
-    \ is never echoed back through any API endpoint. With request-body debug logging\
-    \ enabled (`RUST_LOG=vodopad::api::server=debug` or `sqlx=debug`), `userData`\
-    \ will appear in logs — see Operator notes below.\n- **Backend rejection.** Malformed\
-    \ userData (e.g. invalid YAML) is detected by the VM backend during provisioning\
-    \ and surfaces as a `Failed` VM status, not a synchronous `400`.\n\n### Operator\
-    \ notes\n\n- The side-table `crd.user_virtual_machine_cloud_init` keeps a row\
-    \ per VM that ever had cloud-init. After successful handoff to the VM backend\
-    \ (status `Launching` or `Launched`) — or upon terminal cleanup (`Failed` from\
-    \ create-deadline timeout, or `Terminating`/`Terminated` from termination) — the\
-    \ row's `user_data` column is set to `NULL` in the same transaction as the status\
-    \ change. The row itself stays as a permanent \"had cloud-init\" marker — its\
-    \ existence is the source of truth for the non-null `cloudInit` object on the\
-    \ response.\n- WAL/audit logs and `pg_dump` backups can preserve the **pre-wipe**\
+    \ \\\n  -H \"X-API-KEY: <YOUR_API_KEY>\" \\\n  -H \"Content-Type: application/json\"\
+    \ \\\n  -d '{\n        \"clusterId\": \"...\",\n        \"name\": \"demo\",\n\
+    \        \"configurationId\": \"...\",\n        \"bootDisk\": { \"...\": \"...\"\
+    \ },\n        \"sshKeys\": [\"...\"],\n        \"cloudInit\": {\n          \"\
+    userData\": \"#cloud-config\\nruncmd:\\n  - echo hello\\n\"\n        }\n     \
+    \ }'\n```\n\nNotes:\n\n- **Create-only.** `userData` is meaningful only on `POST\
+    \ /v2/vms`. `PATCH` requests have no `userData` field; sending one is dropped\
+    \ during JSON deserialization.\n- **Ephemeral.** The content is stored only until\
+    \ the VM transitions to `Launched` (or `Failed` on create-deadline, or `Terminating`/`Terminated`\
+    \ on termination), then erased in the same transaction as the status change. After\
+    \ that, listing or fetching the VM returns a non-null `cloudInit` object (no fields)\
+    \ as a permanent marker but never the original content.\n- **Length limit.** Maximum\
+    \ 16 KiB enforced as a **byte count** (UTF-8 multi-byte characters are counted\
+    \ by their byte size, not code-point count). Oversize requests are rejected with\
+    \ `400 Bad Request`.\n- **Privacy.** The content is never echoed back through\
+    \ any API endpoint. With request-body debug logging enabled (`RUST_LOG=vodopad::api::server=debug`\
+    \ or `sqlx=debug`), `userData` will appear in logs — see Operator notes below.\n\
+    - **Backend rejection.** Malformed userData (e.g. invalid YAML) is detected by\
+    \ the VM backend during provisioning and surfaces as a `Failed` VM status, not\
+    \ a synchronous `400`.\n\n### Operator notes\n\n- The side-table `crd.user_virtual_machine_cloud_init`\
+    \ keeps a row per VM that ever had cloud-init. After successful handoff to the\
+    \ VM backend (status `Launching` or `Launched`) — or upon terminal cleanup (`Failed`\
+    \ from create-deadline timeout, or `Terminating`/`Terminated` from termination)\
+    \ — the row's `user_data` column is set to `NULL` in the same transaction as the\
+    \ status change. The row itself stays as a permanent \"had cloud-init\" marker\
+    \ — its existence is the source of truth for the non-null `cloudInit` object on\
+    \ the response.\n- WAL/audit logs and `pg_dump` backups can preserve the **pre-wipe**\
     \ state (raw `user_data` bytes) until they roll over. Treat these artefacts as\
     \ carrying potentially-sensitive material; restrict access and retention accordingly.\n\
     - Do not enable `RUST_LOG=vodopad::api::server=debug` in production — the request/response\
@@ -102,7 +100,7 @@ info:
   license:
     name: AGPL-3
     identifier: AGPL-3
-  version: 0.11.2
+  version: 0.12.0
 paths:
   /v1/billing/charges/aggregated:
     get:
@@ -1293,10 +1291,16 @@ paths:
           $ref: '#/components/schemas/SortOrderDto'
       - name: page
         in: query
+        description: 'One-based page number. Both this value and the computed
+
+          `(page - 1) * perPage` offset must be no greater than
+
+          9,007,199,254,740,991.'
         required: false
         schema:
           type: integer
           format: u-int64
+          maximum: 9007199254740991
           minimum: 0
       - name: perPage
         in: query
@@ -1745,10 +1749,16 @@ paths:
           $ref: '#/components/schemas/UserSecurityGroupStatusDto'
       - name: page
         in: query
+        description: 'One-based page number. Both this value and the computed
+
+          `(page - 1) * perPage` offset must be no greater than
+
+          9,007,199,254,740,991.'
         required: false
         schema:
           type: integer
           format: u-int64
+          maximum: 9007199254740991
           minimum: 0
       - name: perPage
         in: query
@@ -1821,9 +1831,9 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token:
-        - security_group:read
+        - security_groups:read
       - api_key:
-        - security_group:read
+        - security_groups:read
     post:
       tags:
       - SecurityGroup
@@ -1899,9 +1909,9 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token:
-        - security_group:write
+        - security_groups:write
       - api_key:
-        - security_group:write
+        - security_groups:write
   /v1/security_groups/delete:
     post:
       tags:
@@ -1980,9 +1990,9 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token:
-        - security_group:write
+        - security_groups:write
       - api_key:
-        - security_group:write
+        - security_groups:write
   /v1/security_groups/{security_group_id}:
     delete:
       tags:
@@ -2060,9 +2070,9 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token:
-        - security_group:write
+        - security_groups:write
       - api_key:
-        - security_group:write
+        - security_groups:write
     patch:
       tags:
       - SecurityGroup
@@ -2146,9 +2156,9 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token:
-        - security_group:write
+        - security_groups:write
       - api_key:
-        - security_group:write
+        - security_groups:write
   /v1/service/status:
     get:
       tags:
@@ -2232,10 +2242,16 @@ paths:
             $ref: '#/components/schemas/UserSshKeyId'
       - name: page
         in: query
+        description: 'One-based page number. Both this value and the computed
+
+          `(page - 1) * perPage` offset must be no greater than
+
+          9,007,199,254,740,991.'
         required: false
         schema:
           type: integer
           format: u-int64
+          maximum: 9007199254740991
           minimum: 0
       - name: perPage
         in: query
@@ -2615,10 +2631,16 @@ paths:
           $ref: '#/components/schemas/SortOrderDto'
       - name: page
         in: query
+        description: 'One-based page number. Both this value and the computed
+
+          `(page - 1) * perPage` offset must be no greater than
+
+          9,007,199,254,740,991.'
         required: false
         schema:
           type: integer
           format: u-int64
+          maximum: 9007199254740991
           minimum: 0
       - name: perPage
         in: query
@@ -3232,10 +3254,16 @@ paths:
           $ref: '#/components/schemas/UserVpcId'
       - name: page
         in: query
+        description: 'One-based page number. Both this value and the computed
+
+          `(page - 1) * perPage` offset must be no greater than
+
+          9,007,199,254,740,991.'
         required: false
         schema:
           type: integer
           format: u-int64
+          maximum: 9007199254740991
           minimum: 0
       - name: perPage
         in: query
@@ -3308,6 +3336,8 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token:
+        - subnet:read
+      - api_key:
         - subnet:read
   /v1/subnets/delete:
     post:
@@ -3388,6 +3418,8 @@ paths:
       security:
       - access_jwt_token:
         - subnet:write
+      - api_key:
+        - subnet:write
   /v1/subnets/{subnet_id}:
     delete:
       tags:
@@ -3465,6 +3497,8 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token:
+        - subnet:write
+      - api_key:
         - subnet:write
     patch:
       tags:
@@ -3562,6 +3596,8 @@ paths:
       security:
       - access_jwt_token:
         - subnet:write
+      - api_key:
+        - subnet:write
   /v1/subnets/{subnet_id}/default:
     post:
       tags:
@@ -3641,6 +3677,8 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token:
+        - subnet:write
+      - api_key:
         - subnet:write
   /v1/users/balances/refresh:
     post:
@@ -3967,10 +4005,16 @@ paths:
           type: string
       - name: page
         in: query
+        description: 'One-based page number. Both this value and the computed
+
+          `(page - 1) * perPage` offset must be no greater than
+
+          9,007,199,254,740,991.'
         required: false
         schema:
           type: integer
           format: u-int64
+          maximum: 9007199254740991
           minimum: 0
       - name: perPage
         in: query
@@ -4391,14 +4435,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/UserSubnetDto'
         '400':
-          description: Bad Request
+          description: The request is invalid or the selected VPC has failed (`parent_vpc_failed`)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: bad_request
-                error: Wrong parameters
+                code: parent_vpc_failed
+                error: VPC 00000000-0000-0000-0000-000000000000 has failed and cannot
+                  accept subnets
         '401':
           description: Unauthorized
           content:
@@ -4417,25 +4462,37 @@ paths:
               example:
                 code: forbidden
                 error: Not allowed to call this endpoint
+        '404':
+          description: The selected VPC does not exist, is not owned by the caller,
+            or is being removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: not_found
+                error: VPC 00000000-0000-0000-0000-000000000000 was not found
         '409':
-          description: Conflict
+          description: The selected VPC is being parked (`conflict`); retry shortly.
+            The requested CIDR overlaps the reserved default range (`reserved_default_subnet_cidr_conflict`);
+            change the request
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: reserved_default_subnet_cidr_conflict
+                error: subnet CIDR overlaps the IPv4 range reserved for the default
+                  subnet
         '422':
-          description: Unprocessable Entity
+          description: Egress was requested for an IPv6-only subnet (`ipv6_egress_unsupported`)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: unprocessable_entity
-                error: Unable to process the entity
+                code: ipv6_egress_unsupported
+                error: egress is not supported on IPv6-only subnets
         '500':
           description: Internal Server Error
           content:
@@ -4447,6 +4504,8 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token:
+        - subnet:write
+      - api_key:
         - subnet:write
   /v2/billing/get_history:
     get:
@@ -4495,10 +4554,16 @@ paths:
           $ref: '#/components/schemas/SortOrderDto'
       - name: page
         in: query
+        description: 'One-based page number. Both this value and the computed
+
+          `(page - 1) * perPage` offset must be no greater than
+
+          9,007,199,254,740,991.'
         required: false
         schema:
           type: integer
           format: u-int64
+          maximum: 9007199254740991
           minimum: 0
       - name: perPage
         in: query
@@ -4676,10 +4741,16 @@ paths:
           $ref: '#/components/schemas/SortOrderDto'
       - name: page
         in: query
+        description: 'One-based page number. Both this value and the computed
+
+          `(page - 1) * perPage` offset must be no greater than
+
+          9,007,199,254,740,991.'
         required: false
         schema:
           type: integer
           format: u-int64
+          maximum: 9007199254740991
           minimum: 0
       - name: perPage
         in: query
@@ -5152,10 +5223,16 @@ paths:
             $ref: '#/components/schemas/VmExpand'
       - name: page
         in: query
+        description: 'One-based page number. Both this value and the computed
+
+          `(page - 1) * perPage` offset must be no greater than
+
+          9,007,199,254,740,991.'
         required: false
         schema:
           type: integer
           format: u-int64
+          maximum: 9007199254740991
           minimum: 0
       - name: perPage
         in: query
@@ -5898,6 +5975,12 @@ paths:
               example:
                 code: forbidden
                 error: Not allowed to call this endpoint
+        '404':
+          description: The VM was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '409':
           description: Conflict
           content:
@@ -5978,6 +6061,12 @@ paths:
               example:
                 code: forbidden
                 error: Not allowed to call this endpoint
+        '404':
+          description: The VM was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '409':
           description: Conflict
           content:
@@ -6164,6 +6253,12 @@ paths:
               example:
                 code: forbidden
                 error: Not allowed to call this endpoint
+        '404':
+          description: The VM was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '409':
           description: Conflict
           content:
@@ -6244,6 +6339,12 @@ paths:
               example:
                 code: forbidden
                 error: Not allowed to call this endpoint
+        '404':
+          description: The VM was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '409':
           description: Conflict
           content:
@@ -6371,6 +6472,170 @@ paths:
       - api_key:
         - vms:write
   /v3/vms:
+    get:
+      tags:
+      - VMs
+      description: Lists the caller's VMs using the v2 response schema and query semantics.
+      operationId: get_users_vms_v3
+      parameters:
+      - name: ids
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserVmId'
+      - name: name
+        in: query
+        description: Case-insensitive ILIKE match on name; '%' and '_' in the value
+          act as SQL wildcards (any-sequence / any-single-char), not literal characters.
+        required: false
+        schema:
+          type: string
+        example: my-vm
+      - name: status
+        in: query
+        description: 'Keep only VMs whose status is in this set. Repeat the parameter
+          using
+
+          bracket notation (`status[0]=launched&status[1]=new`); a single
+
+          `status=launched` is also accepted. An empty set applies no filtering.'
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserVmStatusDto'
+      - name: excludeStatus
+        in: query
+        description: 'Drop VMs whose status is in this set (`excludeStatus[0]=terminated`).
+
+          Combined with `status`, the result is the intersection. An empty set
+
+          applies no filtering.'
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserVmStatusDto'
+      - name: clusterId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ClusterId'
+      - name: publicIpId
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/UserPublicIpId'
+      - name: sort
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/SortFieldDto'
+      - name: order
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/SortOrderDto'
+      - name: expand
+        in: query
+        description: 'Resolve attached resources inline. Repeat with bracket notation
+
+          (`expand[0]=bootDisk&expand[1]=dataDisks`). Default response keeps bare
+          IDs.'
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/VmExpand'
+      - name: page
+        in: query
+        description: 'One-based page number. Both this value and the computed
+
+          `(page - 1) * perPage` offset must be no greater than
+
+          9,007,199,254,740,991.'
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          maximum: 9007199254740991
+          minimum: 0
+      - name: perPage
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: u-int64
+          minimum: 0
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse_UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: bad_request
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: unauthorized
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: forbidden
+                error: Not allowed to call this endpoint
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: default_topology_unusable
+                error: 'the default network is not usable: the default VPC is unhealthy;
+                  delete the default VPC and retry'
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: unprocessable_entity
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: internal_server_error
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:read
+      - api_key:
+        - vms:read
     post:
       tags:
       - VMs
@@ -6461,6 +6726,104 @@ paths:
       - api_key:
         - vms:write
   /v3/vms/{vm_id}:
+    get:
+      tags:
+      - VMs
+      description: Gets one of the caller's VMs using the v2 response schema and expansion
+        semantics.
+      operationId: get_users_vm_v3
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user VM to fetch
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: expand
+        in: query
+        description: 'Resolve attached resources inline. Repeat with bracket notation
+
+          (`expand[0]=bootDisk&expand[1]=dataDisks`). Default response keeps bare
+          IDs.'
+        required: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/VmExpand'
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: bad_request
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: unauthorized
+                error: Auth token invalid or missing
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: forbidden
+                error: Not allowed to call this endpoint
+        '404':
+          description: The VM does not exist or is not owned by the caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: default_topology_unusable
+                error: 'the default network is not usable: the default VPC is unhealthy;
+                  delete the default VPC and retry'
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: unprocessable_entity
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: internal_server_error
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:read
+      - api_key:
+        - vms:read
     delete:
       tags:
       - VMs
@@ -6673,7 +7036,9 @@ paths:
           format: uuid
       requestBody:
         description: Select an existing boot disk or create a replacement draft boot
-          disk
+          disk. Creation requires a tagged source. Catalog existence is checked synchronously
+          and its current URL is captured without later refresh. Image reachability,
+          volume fit, and import completion are not verified synchronously.
         content:
           application/json:
             schema:
@@ -6714,8 +7079,8 @@ paths:
                 code: forbidden
                 error: Not allowed to call this endpoint
         '404':
-          description: The draft VM, storage, or OS image does not exist or is not
-            owned by the caller
+          description: The draft VM, existing storage, or catalog image does not exist
+            or is not owned by the caller
           content:
             application/json:
               schema:
@@ -7613,6 +7978,188 @@ paths:
         - vms:write
       - api_key:
         - vms:write
+  /v3/vms/{vm_id}/restart:
+    post:
+      tags:
+      - VMs
+      description: Requests an asynchronous restart of a live VM.
+      operationId: restart_users_vm_v3
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user VM to restart
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Persisted Restarting transition; the restart continues asynchronously.
+            Reconcile an unknown request outcome with GET /v3/vms/{vm_id}.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: bad_request
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: unauthorized
+                error: Auth token invalid or missing
+        '403':
+          description: The caller lacks vms:write
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: The VM does not exist or is not owned by the caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '406':
+          description: The VM cannot be restarted in its current status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: default_topology_unusable
+                error: 'the default network is not usable: the default VPC is unhealthy;
+                  delete the default VPC and retry'
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: unprocessable_entity
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: internal_server_error
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
+  /v3/vms/{vm_id}/softreboot:
+    post:
+      tags:
+      - VMs
+      description: Requests an asynchronous soft reboot of a live VM.
+      operationId: softreboot_users_vm_v3
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user VM to soft reboot
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Persisted SoftRebooting transition; the reboot continues asynchronously.
+            Reconcile an unknown request outcome with GET /v3/vms/{vm_id}.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: bad_request
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: unauthorized
+                error: Auth token invalid or missing
+        '403':
+          description: The caller lacks vms:write
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: The VM does not exist or is not owned by the caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '406':
+          description: The VM cannot be soft rebooted in its current status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: default_topology_unusable
+                error: 'the default network is not usable: the default VPC is unhealthy;
+                  delete the default VPC and retry'
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: unprocessable_entity
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: internal_server_error
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
   /v3/vms/{vm_id}/ssh-keys:
     put:
       tags:
@@ -8014,6 +8561,99 @@ paths:
         - vms:write
       - api_key:
         - vms:write
+  /v3/vms/{vm_id}/terminate:
+    post:
+      tags:
+      - VMs
+      description: Requests asynchronous termination of a live VM. Draft VMs use DELETE
+        /v3/vms/{vm_id}.
+      operationId: terminate_users_vm_v3
+      parameters:
+      - name: vm_id
+        in: path
+        description: The ID of the user VM to terminate
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Persisted Terminating transition; termination continues asynchronously.
+            Reconcile an unknown request outcome with GET /v3/vms/{vm_id}.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserVmDto'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: bad_request
+                error: Wrong parameters
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: unauthorized
+                error: Auth token invalid or missing
+        '403':
+          description: The caller lacks vms:write
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: The VM does not exist or is not owned by the caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '406':
+          description: The live VM cannot be terminated in its current status; remove
+            a draft with DELETE /v3/vms/{vm_id}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: default_topology_unusable
+                error: 'the default network is not usable: the default VPC is unhealthy;
+                  delete the default VPC and retry'
+        '422':
+          description: Unprocessable Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: unprocessable_entity
+                error: Unable to process the entity
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                code: internal_server_error
+                error: Unexpected server error
+      security:
+      - access_jwt_token:
+        - vms:write
+      - api_key:
+        - vms:write
 components:
   schemas:
     AddDataDiskRequest:
@@ -8119,6 +8759,11 @@ components:
           format: u-int64
           example: '100'
           minimum: 0
+    BootMode:
+      type: string
+      enum:
+      - BIOS
+      - EFI
     BulkClusterResourcesDto:
       type: object
       required:
@@ -8311,10 +8956,14 @@ components:
             - downloadUrl
             - iconUrl
             - username
+            - bootMode
             - isDefault
             - createdAt
             - updatedAt
             properties:
+              bootMode:
+                $ref: '#/components/schemas/BootMode'
+                description: Catalog firmware, serialized as BIOS or EFI.
               createdAt:
                 type: string
                 example: '2024-01-01T00:00:00Z'
@@ -8597,19 +9246,19 @@ components:
       type: object
       required:
       - volumeGb
-      - imageId
+      - source
       properties:
-        imageId:
-          type: string
-          example: da1e99153be74618820a164eebcbdc66
         name:
           type:
           - string
           - 'null'
+        source:
+          $ref: '#/components/schemas/DraftBootImageSourceRequest'
         volumeGb:
           type: integer
           format: u-int32
           minimum: 25
+      additionalProperties: false
     CreateTopUpV2Request:
       type: object
       required:
@@ -8724,6 +9373,14 @@ components:
           type:
           - string
           - 'null'
+          description: 'Image URL for v1 storage and v2 VM creation. The complete
+            URL must end
+
+            in a supported lowercase image suffix; query parameters, including
+
+            signed-URL parameters, are not accepted.
+
+            Firmware is fixed at creation: exact catalog URL match, otherwise BIOS.'
           example: https://example.com/image.qcow2
         replicated:
           type: boolean
@@ -8857,10 +9514,14 @@ components:
       - downloadUrl
       - iconUrl
       - username
+      - bootMode
       - isDefault
       - createdAt
       - updatedAt
       properties:
+        bootMode:
+          $ref: '#/components/schemas/BootMode'
+          description: Catalog firmware, serialized as BIOS or EFI.
         createdAt:
           type: string
           example: '2024-01-01T00:00:00Z'
@@ -8979,6 +9640,43 @@ components:
       enum:
       - bootDisk
       - dataDisk
+    DraftBootImageSourceRequest:
+      oneOf:
+      - type: object
+        required:
+        - type
+        - imageId
+        properties:
+          imageId:
+            type: string
+          type:
+            type: string
+            enum:
+            - catalog
+        additionalProperties: false
+      - type: object
+        required:
+        - type
+        - url
+        properties:
+          type:
+            type: string
+            enum:
+            - http
+          url:
+            type: string
+            format: uri
+            description: Canonical HTTPS image URI, preserved exactly; URLs requiring
+              normalization are rejected. The path must end in a lowercase .qcow2,
+              .img, .raw, .raw.xz, .raw.gz, .img.xz, or .img.gz suffix; the query
+              is preserved. Import is asynchronous. An exact catalog URL match supplies
+              that image's firmware mode; unmatched URLs must be BIOS-bootable. Volume
+              fit is not verified synchronously; import can fail asynchronously. Network
+              reachability depends on the cluster importer egress policy.
+            maxLength: 16384
+        additionalProperties: false
+      discriminator:
+        propertyName: type
     DraftDependencyKind:
       type: string
       description: 'The dependency a provision violation points at. One `oneOf` member
@@ -9251,9 +9949,11 @@ components:
       - storage_not_draft
       - default_topology_unusable
       - reserved_default_subnet_cidr_conflict
+      - default_subnet_already_exists
       - parent_vpc_failed
       - ipv6_egress_unsupported
       - default_image_cannot_delete
+      - api_key_scope_not_delegable
       - vpc_has_live_children
       - service_unavailable
       - capacity_telemetry_unavailable
@@ -10069,7 +10769,7 @@ components:
           minimum: 0
         totalPages:
           type: integer
-          format: u-int32
+          format: u-int64
           minimum: 0
         totalRecords:
           type: integer
@@ -10541,13 +11241,10 @@ components:
       - attachToVm
     StorageImageDto:
       type: object
-      description: 'Slim reference to the OS image a storage was created from. Present
-        only when
+      description: 'Current catalog image selected explicitly or associated by exact
+        download-URL match.
 
-        the storage''s `init_url` matches a catalog image; absent for custom URLs
-        and
-
-        data disks.'
+        Absent for non-catalog URLs, data disks, and catalog images deleted later.'
       required:
       - id
       - name
@@ -12127,6 +12824,10 @@ components:
       type: apiKey
       in: header
       name: X-API-KEY
+    s2s_api_key:
+      type: apiKey
+      in: header
+      name: X-S2S-API-KEY
 security:
 - api_key: []
 tags:
