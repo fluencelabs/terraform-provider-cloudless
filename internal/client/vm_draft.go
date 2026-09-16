@@ -80,18 +80,16 @@ type CreateDraftBootDisk struct {
 	Name     *string `json:"name,omitempty"`
 }
 
-// Source is the tagged DraftBootImageSourceRequest: the image comes from the
-// catalog by id, or from an HTTPS URL the cluster imports asynchronously.
-// Since 0.12.0 an untagged imageId is refused.
+// Source is the tagged DraftBootImageSourceRequest. Since 0.12.0 an untagged
+// imageId is refused. The other variant of the tag — an HTTPS image URL the
+// cluster imports — is not built here: on 0.13.0 it also requires a bootMode,
+// and the provider has nowhere to say one yet
+// (graph @cloudless/fluence, node #1911).
 type Source struct {
 	ImageID string
-	URL     string
 }
 
 func (s Source) MarshalJSON() ([]byte, error) {
-	if s.URL != "" {
-		return json.Marshal(map[string]string{"type": "http", "url": s.URL})
-	}
 	return json.Marshal(map[string]string{"type": "catalog", "imageId": s.ImageID})
 }
 
