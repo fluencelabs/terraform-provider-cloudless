@@ -2,8 +2,12 @@ package client
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 // /v3 draft lifecycle. Since 0.14.0 a draft is created whole: one POST carries
@@ -118,13 +122,28 @@ type ResourceIDs struct {
 	PublicIPIDs []string `json:"publicIpIds"`
 }
 
-// CreateVMDraft creates a draft VM from one request (POST /v3/vms, 201).
+// CreateVMDraft creates a draft VM from one request (POST /v3/vms, 201). The
+// Idempotency-Key header is required: it names one logical create, so a retry
+// after a lost answer returns the original receipt instead of a second VM.
+// Each call gets a fresh key — a Terraform create is never replayed by the
+// provider itself.
 func (c *Client) CreateVMDraft(ctx context.Context, req VMDraftRequest) (*CreatedVM, error) {
 	var out CreatedVM
-	if err := c.do(ctx, http.MethodPost, "/v3/vms", nil, req, &out); err != nil {
+	headers := map[string]string{"Idempotency-Key": newIdempotencyKey()}
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v3/vms", nil, headers, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+func newIdempotencyKey() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// A key only has to be unique per call; the clock is enough when the
+		// random source is not available.
+		return "tf-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // UpdateVMRequest is the body of PATCH /v3/vms/{id}: name and SKU. The SKU is

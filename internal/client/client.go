@@ -113,6 +113,19 @@ func IsNotAcceptable(err error) bool {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body, out any) error {
+	return c.doWithHeaders(ctx, method, path, query, nil, body, out)
+}
+
+// doWithHeaders is do with extra request headers — /v3 creates carry an
+// Idempotency-Key, which the OpenAPI contract marks required but the body
+// validator cannot see.
+func (c *Client) doWithHeaders(
+	ctx context.Context,
+	method, path string,
+	query url.Values,
+	headers map[string]string,
+	body, out any,
+) error {
 	u := c.endpoint + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
@@ -141,6 +154,9 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	req.Header.Set("Authorization", "X-API-KEY "+c.apiKey)
 	req.Header.Set("X-Api-Key", c.apiKey)
 	req.Header.Set("User-Agent", c.ua)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -445,9 +461,11 @@ func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
 }
 
 // TerminateVM terminates a live VM (POST /v3/vms/{id}/terminate). A draft has
-// never been allocated and is discarded with DeleteVMDraft instead.
+// never been allocated and is discarded with DeleteVMDraft instead. Like the
+// create, this one carries a required Idempotency-Key.
 func (c *Client) TerminateVM(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v3/vms/"+id+"/terminate", nil, nil, nil)
+	headers := map[string]string{"Idempotency-Key": newIdempotencyKey()}
+	return c.doWithHeaders(ctx, http.MethodPost, "/v3/vms/"+id+"/terminate", nil, headers, nil, nil)
 }
 
 // AddVMStorages attaches data disks one by one (POST /v3/vms/{id}/storages);
