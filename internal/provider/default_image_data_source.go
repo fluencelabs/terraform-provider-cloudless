@@ -22,21 +22,32 @@ func (d *defaultImageDS) Metadata(
 	resp.TypeName = req.ProviderTypeName + "_default_image"
 }
 
-func (d *defaultImageDS) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (d *defaultImageDS) Schema(
+	_ context.Context,
+	_ datasource.SchemaRequest,
+	resp *datasource.SchemaResponse,
+) {
 	resp.Schema = schema.Schema{
 		Description: "Look up exactly one catalog OS image by filter criteria (usually slug). " +
 			"Errors if more than one matches — this is the readable way to name a boot_disk image_id.",
 		Attributes: map[string]schema.Attribute{
-			"id":           schema.StringAttribute{Optional: true, Computed: true, Description: "Explicit image id."},
+			"id": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Explicit image id.",
+			},
 			"slug":         schema.StringAttribute{Optional: true, Computed: true},
 			"name":         schema.StringAttribute{Optional: true, Computed: true},
 			"distribution": schema.StringAttribute{Optional: true, Computed: true},
-			"download_url": schema.StringAttribute{Computed: true},
+			"boot_mode": schema.StringAttribute{
+				Computed:    true,
+				Description: "Firmware the image boots with (BIOS or EFI).",
+			},
+			"is_default": schema.BoolAttribute{Computed: true},
 			"username": schema.StringAttribute{
 				Computed:    true,
 				Description: "The account the image ships with — who to ssh in as.",
 			},
-			"icon_url":   schema.StringAttribute{Computed: true},
 			"created_at": schema.StringAttribute{Computed: true},
 			"updated_at": schema.StringAttribute{Computed: true},
 		},
@@ -51,7 +62,11 @@ func (d *defaultImageDS) Configure(
 	d.c = clientFromProviderData(req.ProviderData, &resp.Diagnostics)
 }
 
-func (d *defaultImageDS) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+func (d *defaultImageDS) Read(
+	ctx context.Context,
+	req datasource.ReadRequest,
+	resp *datasource.ReadResponse,
+) {
 	var filter defaultImageModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &filter)...)
 	if resp.Diagnostics.HasError() {
@@ -92,9 +107,9 @@ func (d *defaultImageDS) Read(ctx context.Context, req datasource.ReadRequest, r
 		Slug:         types.StringValue(im.Slug),
 		Name:         types.StringValue(im.Name),
 		Distribution: types.StringValue(im.Distribution),
-		DownloadURL:  types.StringValue(im.DownloadURL),
+		BootMode:     types.StringValue(im.BootMode),
+		IsDefault:    types.BoolValue(im.IsDefault),
 		Username:     types.StringValue(im.Username),
-		IconURL:      types.StringValue(im.IconURL),
 		CreatedAt:    types.StringValue(im.CreatedAt),
 		UpdatedAt:    types.StringValue(im.UpdatedAt),
 	}

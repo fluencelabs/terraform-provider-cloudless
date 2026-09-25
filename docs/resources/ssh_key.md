@@ -30,6 +30,5 @@ resource "cloudless_ssh_key" "me" {
 - `algorithm` (String)
 - `fingerprint` (String)
 - `id` (String) The ID of this resource.
-- `user_id` (String)
 
 

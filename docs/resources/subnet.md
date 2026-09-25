@@ -38,6 +38,5 @@ resource "cloudless_subnet" "private" {
 - `id` (String) The ID of this resource.
 - `is_default` (Boolean) Whether this is the cluster's default subnet — the one a VM lands on with no network_interface block.
 - `status` (String)
-- `user_id` (String)
 
 

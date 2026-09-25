@@ -17,7 +17,7 @@ func (s *Server) wireClusters() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/clusters", func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc("/v3/clusters", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		out := []map[string]any{}
@@ -41,7 +41,7 @@ func (s *Server) wireDCs() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/datacenters", func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc("/v3/datacenters", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		out := []map[string]any{}

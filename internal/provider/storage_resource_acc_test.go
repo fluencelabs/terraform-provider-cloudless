@@ -51,7 +51,6 @@ resource "cloudless_storage" "data" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("cloudless_storage.data", "name", name),
 					resource.TestCheckResourceAttr("cloudless_storage.data", "volume_gb", "100"),
-					resource.TestCheckResourceAttr("cloudless_storage.data", "role", "DATA"),
 				),
 			},
 			{

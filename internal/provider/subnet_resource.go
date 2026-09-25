@@ -33,7 +33,6 @@ type subnetModel struct {
 	Egress    types.Bool   `tfsdk:"egress"`
 	IsDefault types.Bool   `tfsdk:"is_default"`
 	Status    types.String `tfsdk:"status"`
-	UserID    types.String `tfsdk:"user_id"`
 }
 
 func (r *subnetResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -99,8 +98,7 @@ func (r *subnetResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 				Description: "Whether this is the cluster's default subnet — the one a VM lands on with no network_interface block.",
 			},
-			"status":  schema.StringAttribute{Computed: true},
-			"user_id": schema.StringAttribute{Computed: true},
+			"status": schema.StringAttribute{Computed: true},
 		},
 	}
 }
@@ -273,5 +271,4 @@ func (r *subnetResource) fill(m *subnetModel, s *client.Subnet) {
 	m.Egress = types.BoolValue(s.Egress)
 	m.IsDefault = types.BoolValue(s.IsDefault)
 	m.Status = types.StringValue(s.Status)
-	m.UserID = types.StringValue(s.UserID)
 }

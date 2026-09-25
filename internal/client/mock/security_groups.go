@@ -23,11 +23,8 @@ func (s *Server) wireSGs() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/security_groups", s.handleSGCollection)
-	// /v1/security_groups/delete is an exact path; ServeMux prefers exact
-	// matches over the /v1/security_groups/ prefix, so register both.
-	s.mux.HandleFunc("/v1/security_groups/delete", s.handleSGBulkDelete)
-	s.mux.HandleFunc("/v1/security_groups/", s.handleSGItem)
+	s.mux.HandleFunc("/v3/security-groups", s.handleSGCollection)
+	s.mux.HandleFunc("/v3/security-groups/", s.handleSGItem)
 }
 
 func (s *Server) handleSGCollection(w http.ResponseWriter, r *http.Request) {
@@ -110,41 +107,22 @@ func (s *Server) listSGs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleSGBulkDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.notFound(w, r)
-		return
-	}
-	var body struct {
-		IDs []string `json:"ids"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	// The endpoint answers with the objects it deleted; returning a bare 200
-	// makes the response contract fail.
-	deleted := []map[string]any{}
-	s.mu.Lock()
-	for _, id := range body.IDs {
-		if rec, ok := s.sgMap[id]; ok {
-			deleted = append(deleted, sgWire(rec))
-			delete(s.sgMap, id)
-		}
-	}
-	s.mu.Unlock()
-	s.writeJSON(w, http.StatusOK, deleted)
-}
-
 // handleSGItem serves PATCH /v1/security_groups/{id}.
 func (s *Server) handleSGItem(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		s.notFound(w, r)
-		return
-	}
 	parts := splitPath(r.URL.Path)
 	if len(parts) != resourcePathParts {
 		s.notFound(w, r)
 		return
 	}
 	id := parts[2]
+	if r.Method == http.MethodDelete {
+		s.deleteSG(w, id)
+		return
+	}
+	if r.Method != http.MethodPatch {
+		s.notFound(w, r)
+		return
+	}
 	var body struct {
 		Name         *string         `json:"name"`
 		IngressRules json.RawMessage `json:"ingressRules"`
@@ -172,14 +150,13 @@ func (s *Server) handleSGItem(w http.ResponseWriter, r *http.Request) {
 
 func sgWire(rec *sgRecord) map[string]any {
 	out := map[string]any{
-		"id":         rec.ID,
-		"clusterId":  rec.ClusterID,
-		"name":       rec.Name,
-		"userId":     rec.UserID,
-		"status":     rec.Status,
-		"vpcId":      rec.VPCID,
-		"attachedTo": []string{},
-		"createdAt":  "2026-01-01T00:00:00Z",
+		"id":          rec.ID,
+		"clusterId":   rec.ClusterID,
+		"name":        rec.Name,
+		"status":      rec.Status,
+		"vpcId":       rec.VPCID,
+		"attachments": []map[string]any{},
+		"createdAt":   "2026-01-01T00:00:00Z",
 	}
 	if len(rec.Ingress) > 0 {
 		out["ingressRules"] = rec.Ingress
@@ -192,4 +169,19 @@ func sgWire(rec *sgRecord) map[string]any {
 		out["egressRules"] = map[string]string{"type": "allowAll"}
 	}
 	return out
+}
+
+// deleteSG serves DELETE /{id}: /v3 deletes one resource at a time and
+// answers with the object it removed.
+func (s *Server) deleteSG(w http.ResponseWriter, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.sgMap[id]
+	if !ok {
+		s.writeError(w, "security group not found")
+		return
+	}
+	wire := sgWire(rec)
+	delete(s.sgMap, id)
+	s.writeJSON(w, http.StatusOK, wire)
 }

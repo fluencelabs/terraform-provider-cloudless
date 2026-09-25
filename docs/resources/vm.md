@@ -43,7 +43,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = data.cloudless_default_image.ubuntu.download_url
+  image_id     = data.cloudless_default_image.ubuntu.id
 }
 
 resource "cloudless_public_ip" "app" {

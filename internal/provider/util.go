@@ -96,14 +96,6 @@ func stringFromPtr(p *string) types.String {
 	return types.StringValue(*p)
 }
 
-// boolFromPtr converts a *bool from the API into a types.Bool.
-func boolFromPtr(p *bool) types.Bool {
-	if p == nil {
-		return types.BoolNull()
-	}
-	return types.BoolValue(*p)
-}
-
 // toStringList wraps a []string as a slice of types.String. Used by data
 // source models that hold list-of-string attributes as []types.String for
 // historical reasons; new resources should prefer types.List for Computed

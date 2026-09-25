@@ -32,11 +32,11 @@ func (s *Server) wireCatalogs() {
 			id: catalogConfigLargeID, slug: "cpu-regular-8vcpu-16gb", name: "CPU 8 / RAM 16GB", vcpu: presetLargeVCPU, ramGb: presetLargeRAMGb,
 		}),
 	}
-	s.mux.HandleFunc("/v1/configurations/virtual_machines", func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc("/v3/configurations", func(w http.ResponseWriter, _ *http.Request) {
 		s.writeJSON(w, http.StatusOK, map[string]any{"items": presets})
 	})
 
-	s.mux.HandleFunc("/v1/storages/default_images", func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc("/v3/images", func(w http.ResponseWriter, _ *http.Request) {
 		s.writeJSON(w, http.StatusOK, map[string]any{"items": []map[string]any{
 			imageWire(catalogImageUbuntuID, "ubuntu-24-04-x64", "Ubuntu 24.04", "Ubuntu", "ubuntu"),
 			imageWire(catalogImageDebianID, "debian-12-x64", "Debian 12", "Debian", "debian"),
@@ -70,8 +70,6 @@ func imageWire(id, slug, name, distribution, username string) map[string]any {
 		"slug":         slug,
 		"name":         name,
 		"distribution": distribution,
-		"downloadUrl":  "https://example.com/" + slug + ".qcow2",
-		"iconUrl":      "https://example.com/" + slug + ".svg",
 		"username":     username,
 		"isDefault":    true,
 		"bootMode":     "EFI",

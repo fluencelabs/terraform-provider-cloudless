@@ -29,19 +29,26 @@ type storageModel struct {
 	StorageType types.String `tfsdk:"storage_type"`
 	VolumeGb    types.Int64  `tfsdk:"volume_gb"`
 	Replicated  types.Bool   `tfsdk:"replicated"`
-	OSImage     types.String `tfsdk:"os_image"`
+	ImageID     types.String `tfsdk:"image_id"`
 	Status      types.String `tfsdk:"status"`
-	Role        types.String `tfsdk:"role"`
-	UserID      types.String `tfsdk:"user_id"`
-	AttachedTo  types.List   `tfsdk:"attached_to"`
+	BootMode    types.String `tfsdk:"boot_mode"`
+	AttachedTo  types.List   `tfsdk:"attached_vm_ids"`
 	CreatedAt   types.String `tfsdk:"created_at"`
 }
 
-func (r *storageResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+func (r *storageResource) Metadata(
+	_ context.Context,
+	req resource.MetadataRequest,
+	resp *resource.MetadataResponse,
+) {
 	resp.TypeName = req.ProviderTypeName + "_storage"
 }
 
-func (r *storageResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *storageResource) Schema(
+	_ context.Context,
+	_ resource.SchemaRequest,
+	resp *resource.SchemaResponse,
+) {
 	resp.Schema = schema.Schema{
 		Description: "A storage volume on a Fluence cluster.",
 		Attributes: map[string]schema.Attribute{
@@ -71,16 +78,25 @@ func (r *storageResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Required:      true,
 				PlanModifiers: []planmodifier.Bool{boolplanmodifier.RequiresReplace()},
 			},
-			"os_image": schema.StringAttribute{
-				Optional:      true,
-				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplaceIfConfigured()},
-				Description:   "URL of an OS image. Presence makes this a boot disk.",
+			"image_id": schema.StringAttribute{
+				Optional: true,
+				Computed: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplaceIfConfigured(),
+				},
+				Description: "Catalog image this disk is built from; presence makes it a boot disk. " +
+					"See the cloudless_default_image data source.",
 			},
-			"status":      schema.StringAttribute{Computed: true},
-			"role":        schema.StringAttribute{Computed: true},
-			"user_id":     schema.StringAttribute{Computed: true},
-			"attached_to": schema.ListAttribute{ElementType: types.StringType, Computed: true},
-			"created_at":  schema.StringAttribute{Computed: true},
+			"status": schema.StringAttribute{Computed: true},
+			"boot_mode": schema.StringAttribute{
+				Computed:    true,
+				Description: "Firmware the image boots with (BIOS or EFI).",
+			},
+			"attached_vm_ids": schema.ListAttribute{
+				ElementType: types.StringType, Computed: true,
+				Description: "VMs this disk is attached to.",
+			},
+			"created_at": schema.StringAttribute{Computed: true},
 		},
 	}
 }
@@ -93,21 +109,29 @@ func (r *storageResource) Configure(
 	r.c = clientFromProviderData(req.ProviderData, &resp.Diagnostics)
 }
 
-func (r *storageResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+func (r *storageResource) Create(
+	ctx context.Context,
+	req resource.CreateRequest,
+	resp *resource.CreateResponse,
+) {
 	var plan storageModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	out, err := r.c.CreateStorage(ctx, client.CreateStorageRequest{
+	createReq := client.CreateStorageRequest{
 		ClusterID:   plan.ClusterID.ValueString(),
 		Name:        plan.Name.ValueString(),
 		StorageType: plan.StorageType.ValueString(),
 		VolumeGb:    uint32(plan.VolumeGb.ValueInt64()),
 		Replicated:  plan.Replicated.ValueBool(),
-		OSImage:     plan.OSImage.ValueString(),
-	})
+	}
+	if knownString(plan.ImageID) {
+		src := client.CatalogImage(plan.ImageID.ValueString())
+		createReq.Source = &src
+	}
+	out, err := r.c.CreateStorage(ctx, createReq)
 	if err != nil {
 		resp.Diagnostics.AddError("Create storage failed", err.Error())
 		return
@@ -128,7 +152,11 @@ func (r *storageResource) Create(ctx context.Context, req resource.CreateRequest
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+func (r *storageResource) Read(
+	ctx context.Context,
+	req resource.ReadRequest,
+	resp *resource.ReadResponse,
+) {
 	var state storageModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -151,7 +179,11 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *storageResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+func (r *storageResource) Update(
+	ctx context.Context,
+	req resource.UpdateRequest,
+	resp *resource.UpdateResponse,
+) {
 	var plan, state storageModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -201,7 +233,11 @@ func (r *storageResource) Update(ctx context.Context, req resource.UpdateRequest
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *storageResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+func (r *storageResource) Delete(
+	ctx context.Context,
+	req resource.DeleteRequest,
+	resp *resource.DeleteResponse,
+) {
 	var state storageModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -232,9 +268,9 @@ func (r *storageResource) fill(m *storageModel, s *client.Storage) {
 	m.VolumeGb = types.Int64Value(int64(s.VolumeGb))
 	m.Replicated = types.BoolValue(s.Replicated)
 	m.Status = types.StringValue(s.Status)
-	m.Role = types.StringValue(s.Role)
-	m.UserID = types.StringValue(s.UserID)
-	attached := s.AttachedTo
+	m.ImageID = stringFromPtr(s.ImageID)
+	m.BootMode = stringFromPtr(s.BootMode)
+	attached := s.AttachedVMIDs
 	if attached == nil {
 		attached = []string{}
 	}

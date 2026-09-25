@@ -210,7 +210,6 @@ type PaginationInfo struct {
 
 type SSHKey struct {
 	ID          string `json:"id"`
-	UserID      string `json:"userId"`
 	Name        string `json:"name"`
 	PublicKey   string `json:"publicKey"`
 	Algorithm   string `json:"algorithm"`
@@ -229,7 +228,7 @@ type sshKeysListResponse struct {
 
 func (c *Client) CreateSSHKey(ctx context.Context, req CreateSSHKeyRequest) (*SSHKey, error) {
 	var out SSHKey
-	if err := c.do(ctx, http.MethodPost, "/v1/ssh_keys", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/ssh-keys", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -240,7 +239,7 @@ func (c *Client) CreateSSHKey(ctx context.Context, req CreateSSHKeyRequest) (*SS
 func (c *Client) GetSSHKey(ctx context.Context, id string) (*SSHKey, error) {
 	q := url.Values{"ids": {id}}
 	var resp sshKeysListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/ssh_keys", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/ssh-keys", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -255,44 +254,36 @@ func (c *Client) GetSSHKey(ctx context.Context, id string) (*SSHKey, error) {
 // to recover from a create conflict by matching an existing key by body.
 func (c *Client) ListSSHKeys(ctx context.Context) ([]SSHKey, error) {
 	var resp sshKeysListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/ssh_keys", nil, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/ssh-keys", nil, nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Items, nil
 }
 
 func (c *Client) DeleteSSHKey(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/ssh_keys/delete", nil, idsBody{IDs: []string{id}}, nil)
-}
-
-type idsBody struct {
-	IDs []string `json:"ids"`
+	return c.do(ctx, http.MethodDelete, "/v3/ssh-keys/"+id, nil, nil, nil)
 }
 
 // ---------- VPCs ----------
 
+// VPC mirrors PublicVpcDto.
 type VPC struct {
-	ID             string  `json:"id"`
-	UserID         string  `json:"userId"`
-	ClusterID      string  `json:"clusterId"`
-	Name           string  `json:"name"`
-	EnableExternal *bool   `json:"enableExternal,omitempty"`
-	Status         string  `json:"status"`
-	SubnetsCount   uint32  `json:"subnetsCount"`
-	CreatedAt      string  `json:"createdAt"`
-	ReadySince     *string `json:"readySince,omitempty"`
-	RemovedAt      *string `json:"removedAt,omitempty"`
+	ID         string  `json:"id"`
+	ClusterID  string  `json:"clusterId"`
+	Name       string  `json:"name"`
+	Status     string  `json:"status"`
+	CreatedAt  string  `json:"createdAt"`
+	ReadySince *string `json:"readySince,omitempty"`
+	RemovedAt  *string `json:"removedAt,omitempty"`
 }
 
 type CreateVPCRequest struct {
-	ClusterID      string `json:"clusterId"`
-	Name           string `json:"name"`
-	EnableExternal *bool  `json:"enableExternal,omitempty"`
+	ClusterID string `json:"clusterId"`
+	Name      string `json:"name"`
 }
 
 type UpdateVPCRequest struct {
-	Name           *string `json:"name,omitempty"`
-	EnableExternal *bool   `json:"enableExternal,omitempty"`
+	Name *string `json:"name,omitempty"`
 }
 
 type vpcsListResponse struct {
@@ -302,7 +293,7 @@ type vpcsListResponse struct {
 
 func (c *Client) CreateVPC(ctx context.Context, req CreateVPCRequest) (*VPC, error) {
 	var out VPC
-	if err := c.do(ctx, http.MethodPost, "/v1/vpcs", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/vpcs", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -311,7 +302,7 @@ func (c *Client) CreateVPC(ctx context.Context, req CreateVPCRequest) (*VPC, err
 // ListVPCs returns the first page of the account's VPCs.
 func (c *Client) ListVPCs(ctx context.Context) ([]VPC, error) {
 	var resp vpcsListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/vpcs", nil, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/vpcs", nil, nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Items, nil
@@ -320,7 +311,7 @@ func (c *Client) ListVPCs(ctx context.Context) ([]VPC, error) {
 func (c *Client) GetVPC(ctx context.Context, id string) (*VPC, error) {
 	q := url.Values{"ids": {id}}
 	var resp vpcsListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/vpcs", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/vpcs", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -333,21 +324,20 @@ func (c *Client) GetVPC(ctx context.Context, id string) (*VPC, error) {
 
 func (c *Client) UpdateVPC(ctx context.Context, id string, req UpdateVPCRequest) (*VPC, error) {
 	var out VPC
-	if err := c.do(ctx, http.MethodPatch, "/v1/vpcs/"+id, nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v3/vpcs/"+id, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 func (c *Client) DeleteVPC(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/vpcs/delete", nil, idsBody{IDs: []string{id}}, nil)
+	return c.do(ctx, http.MethodDelete, "/v3/vpcs/"+id, nil, nil, nil)
 }
 
 // ---------- Subnets ----------
 
 type Subnet struct {
 	ID         string  `json:"id"`
-	UserID     string  `json:"userId"`
 	ClusterID  string  `json:"clusterId"`
 	VPCID      string  `json:"vpcId"`
 	Name       string  `json:"name"`
@@ -381,7 +371,7 @@ type subnetsListResponse struct {
 
 func (c *Client) CreateSubnet(ctx context.Context, vpcID string, req CreateSubnetRequest) (*Subnet, error) {
 	var out Subnet
-	if err := c.do(ctx, http.MethodPost, "/v1/vpcs/"+vpcID+"/subnets", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/vpcs/"+vpcID+"/subnets", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -390,7 +380,7 @@ func (c *Client) CreateSubnet(ctx context.Context, vpcID string, req CreateSubne
 // ListSubnets returns the first page of the account's subnets.
 func (c *Client) ListSubnets(ctx context.Context) ([]Subnet, error) {
 	var resp subnetsListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/subnets", nil, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/subnets", nil, nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Items, nil
@@ -399,7 +389,7 @@ func (c *Client) ListSubnets(ctx context.Context) ([]Subnet, error) {
 func (c *Client) GetSubnet(ctx context.Context, id string) (*Subnet, error) {
 	q := url.Values{"ids": {id}}
 	var resp subnetsListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/subnets", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/subnets", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -412,14 +402,14 @@ func (c *Client) GetSubnet(ctx context.Context, id string) (*Subnet, error) {
 
 func (c *Client) UpdateSubnet(ctx context.Context, id string, req UpdateSubnetRequest) (*Subnet, error) {
 	var out Subnet
-	if err := c.do(ctx, http.MethodPatch, "/v1/subnets/"+id, nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v3/subnets/"+id, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 func (c *Client) DeleteSubnet(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/subnets/delete", nil, idsBody{IDs: []string{id}}, nil)
+	return c.do(ctx, http.MethodDelete, "/v3/subnets/"+id, nil, nil, nil)
 }
 
 // ---------- VMs ----------
@@ -518,7 +508,7 @@ type collection[T any] struct {
 
 func (c *Client) ListClusters(ctx context.Context) ([]Cluster, error) {
 	var out collection[Cluster]
-	if err := c.do(ctx, http.MethodGet, "/v1/clusters", nil, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/clusters", nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -538,27 +528,29 @@ type VMConfiguration struct {
 
 func (c *Client) ListVMConfigurations(ctx context.Context) ([]VMConfiguration, error) {
 	var out collection[VMConfiguration]
-	if err := c.do(ctx, http.MethodGet, "/v1/configurations/virtual_machines", nil, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/configurations", nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
 }
 
+// DefaultImage mirrors PublicImageDto. The catalog no longer publishes a
+// download URL: a disk names the image by id.
 type DefaultImage struct {
 	ID           string `json:"id"`
 	Slug         string `json:"slug"`
 	Name         string `json:"name"`
 	Distribution string `json:"distribution"`
-	DownloadURL  string `json:"downloadUrl"`
 	Username     string `json:"username"`
-	IconURL      string `json:"iconUrl"`
+	BootMode     string `json:"bootMode"`
+	IsDefault    bool   `json:"isDefault"`
 	CreatedAt    string `json:"createdAt"`
 	UpdatedAt    string `json:"updatedAt"`
 }
 
 func (c *Client) ListDefaultImages(ctx context.Context) ([]DefaultImage, error) {
 	var out collection[DefaultImage]
-	if err := c.do(ctx, http.MethodGet, "/v1/storages/default_images", nil, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/images", nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -578,7 +570,7 @@ type Datacenter struct {
 
 func (c *Client) ListDatacenters(ctx context.Context) ([]Datacenter, error) {
 	var out collection[Datacenter]
-	if err := c.do(ctx, http.MethodGet, "/v1/datacenters", nil, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/datacenters", nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -850,7 +842,7 @@ type sgListResponse struct {
 
 func (c *Client) CreateSecurityGroup(ctx context.Context, req CreateSecurityGroupRequest) (*SecurityGroup, error) {
 	var out SecurityGroup
-	if err := c.do(ctx, http.MethodPost, "/v1/security_groups", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/security-groups", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -859,7 +851,7 @@ func (c *Client) CreateSecurityGroup(ctx context.Context, req CreateSecurityGrou
 func (c *Client) GetSecurityGroup(ctx context.Context, id string) (*SecurityGroup, error) {
 	q := url.Values{"ids": {id}}
 	var resp sgListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/security_groups", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/security-groups", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -876,30 +868,33 @@ func (c *Client) UpdateSecurityGroup(
 	req UpdateSecurityGroupRequest,
 ) (*SecurityGroup, error) {
 	var out SecurityGroup
-	if err := c.do(ctx, http.MethodPatch, "/v1/security_groups/"+id, nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v3/security-groups/"+id, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 func (c *Client) DeleteSecurityGroup(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/security_groups/delete", nil, idsBody{IDs: []string{id}}, nil)
+	return c.do(ctx, http.MethodDelete, "/v3/security-groups/"+id, nil, nil, nil)
 }
 
 // ---------- Storage ----------
 
+// Storage mirrors PublicStorageDto. A boot disk is one built from an image;
+// the role it used to carry is gone.
 type Storage struct {
-	ID          string   `json:"id"`
-	UserID      string   `json:"userId"`
-	ClusterID   string   `json:"clusterId"`
-	Name        string   `json:"name"`
-	StorageType string   `json:"storageType"`
-	Status      string   `json:"status"`
-	Role        string   `json:"role"`
-	VolumeGb    uint64   `json:"volumeGb"`
-	Replicated  bool     `json:"replicated"`
-	AttachedTo  []string `json:"attachedTo"`
-	CreatedAt   string   `json:"createdAt"`
+	ID            string   `json:"id"`
+	ClusterID     string   `json:"clusterId"`
+	Name          string   `json:"name"`
+	StorageType   string   `json:"storageType"`
+	Status        string   `json:"status"`
+	VolumeGb      uint64   `json:"volumeGb"`
+	Replicated    bool     `json:"replicated"`
+	ImageID       *string  `json:"imageId"`
+	BootMode      *string  `json:"bootMode,omitempty"`
+	AttachedVMIDs []string `json:"attachedVmIds"`
+	CreatedAt     string   `json:"createdAt"`
+	UpdatedAt     string   `json:"updatedAt"`
 }
 
 type CreateStorageRequest struct {
@@ -908,7 +903,8 @@ type CreateStorageRequest struct {
 	StorageType string `json:"storageType"`
 	VolumeGb    uint32 `json:"volumeGb"`
 	Replicated  bool   `json:"replicated"`
-	OSImage     string `json:"osImage,omitempty"`
+	// Source names the image a boot disk is built from; a data disk has none.
+	Source *ImageSource `json:"source,omitempty"`
 }
 
 type UpdateStorageRequest struct {
@@ -923,7 +919,7 @@ type storageListResponse struct {
 
 func (c *Client) CreateStorage(ctx context.Context, req CreateStorageRequest) (*Storage, error) {
 	var out Storage
-	if err := c.do(ctx, http.MethodPost, "/v1/storages", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/storages", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -932,7 +928,7 @@ func (c *Client) CreateStorage(ctx context.Context, req CreateStorageRequest) (*
 func (c *Client) GetStorage(ctx context.Context, id string) (*Storage, error) {
 	q := url.Values{"ids": {id}}
 	var resp storageListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/storages", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/storages", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -945,14 +941,14 @@ func (c *Client) GetStorage(ctx context.Context, id string) (*Storage, error) {
 
 func (c *Client) UpdateStorage(ctx context.Context, id string, req UpdateStorageRequest) (*Storage, error) {
 	var out Storage
-	if err := c.do(ctx, http.MethodPatch, "/v1/storages/"+id, nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v3/storages/"+id, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 func (c *Client) DeleteStorage(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/storages/delete", nil, idsBody{IDs: []string{id}}, nil)
+	return c.do(ctx, http.MethodDelete, "/v3/storages/"+id, nil, nil, nil)
 }
 
 // ---------- Public IPs ----------
@@ -993,7 +989,7 @@ type publicIPListResponse struct {
 
 func (c *Client) CreatePublicIP(ctx context.Context, req CreatePublicIPRequest) (*PublicIP, error) {
 	var out PublicIP
-	if err := c.do(ctx, http.MethodPost, "/v1/public_ips", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/public-ips", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -1002,7 +998,7 @@ func (c *Client) CreatePublicIP(ctx context.Context, req CreatePublicIPRequest) 
 func (c *Client) GetPublicIP(ctx context.Context, id string) (*PublicIP, error) {
 	q := url.Values{"ids": {id}}
 	var resp publicIPListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/public_ips", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/public-ips", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -1015,12 +1011,12 @@ func (c *Client) GetPublicIP(ctx context.Context, id string) (*PublicIP, error) 
 
 func (c *Client) UpdatePublicIP(ctx context.Context, id string, req UpdatePublicIPRequest) (*PublicIP, error) {
 	var out PublicIP
-	if err := c.do(ctx, http.MethodPatch, "/v1/public_ips/"+id, nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v3/public-ips/"+id, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 func (c *Client) DeletePublicIP(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/public_ips/delete", nil, idsBody{IDs: []string{id}}, nil)
+	return c.do(ctx, http.MethodDelete, "/v3/public-ips/"+id, nil, nil, nil)
 }

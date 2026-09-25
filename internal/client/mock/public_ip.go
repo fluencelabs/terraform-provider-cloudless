@@ -29,11 +29,8 @@ func (s *Server) wirePublicIPs() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/public_ips", s.handlePublicIPCollection)
-	// /v1/public_ips/delete is an exact path; ServeMux prefers exact matches
-	// over the /v1/public_ips/ prefix, so register both.
-	s.mux.HandleFunc("/v1/public_ips/delete", s.handlePublicIPBulkDelete)
-	s.mux.HandleFunc("/v1/public_ips/", s.handlePublicIPItem)
+	s.mux.HandleFunc("/v3/public-ips", s.handlePublicIPCollection)
+	s.mux.HandleFunc("/v3/public-ips/", s.handlePublicIPItem)
 }
 
 func (s *Server) handlePublicIPCollection(w http.ResponseWriter, r *http.Request) {
@@ -90,41 +87,22 @@ func (s *Server) listPublicIPs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handlePublicIPBulkDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.notFound(w, r)
-		return
-	}
-	var body struct {
-		IDs []string `json:"ids"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	// The endpoint answers with the objects it deleted; returning a bare 200
-	// makes the response contract fail.
-	deleted := []map[string]any{}
-	s.mu.Lock()
-	for _, id := range body.IDs {
-		if rec, ok := s.publicIPMap[id]; ok {
-			deleted = append(deleted, publicIPWire(rec))
-			delete(s.publicIPMap, id)
-		}
-	}
-	s.mu.Unlock()
-	s.writeJSON(w, http.StatusOK, deleted)
-}
-
 // handlePublicIPItem serves PATCH /v1/public_ips/{id}.
 func (s *Server) handlePublicIPItem(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		s.notFound(w, r)
-		return
-	}
 	parts := splitPath(r.URL.Path)
 	if len(parts) != resourcePathParts {
 		s.notFound(w, r)
 		return
 	}
 	id := parts[2]
+	if r.Method == http.MethodDelete {
+		s.deletePublicIP(w, id)
+		return
+	}
+	if r.Method != http.MethodPatch {
+		s.notFound(w, r)
+		return
+	}
 	var body struct {
 		Name *string `json:"name"`
 	}
@@ -148,16 +126,31 @@ func publicIPWire(rec *publicIPRecord) map[string]any {
 		"clusterId":   rec.ClusterID,
 		"name":        rec.Name,
 		"addressType": rec.AddressType,
-		"userId":      rec.UserID,
 		"status":      rec.Status,
 		"createdAt":   "2026-01-01T00:00:00Z",
+		"updatedAt":   "2026-01-01T00:00:00Z",
 	}
 	if rec.Address != "" {
 		out["address"] = rec.Address
 	}
 	if rec.AttachedTo != "" {
-		// UserVmReference: the API surfaces id + name of the holding VM.
-		out["attachedTo"] = map[string]any{"id": rec.AttachedTo, "name": "vm-" + rec.AttachedTo}
+		// PublicIpDto names the holding VM by id alone.
+		out["vmId"] = rec.AttachedTo
 	}
 	return out
+}
+
+// deletePublicIP serves DELETE /{id}: /v3 deletes one resource at a time and
+// answers with the object it removed.
+func (s *Server) deletePublicIP(w http.ResponseWriter, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.publicIPMap[id]
+	if !ok {
+		s.writeError(w, "public ip not found")
+		return
+	}
+	wire := publicIPWire(rec)
+	delete(s.publicIPMap, id)
+	s.writeJSON(w, http.StatusOK, wire)
 }

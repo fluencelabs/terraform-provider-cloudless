@@ -34,8 +34,8 @@ output "ssh_user" {
 
 ### Read-Only
 
+- `boot_mode` (String) Firmware the image boots with (BIOS or EFI).
 - `created_at` (String)
-- `download_url` (String)
-- `icon_url` (String)
+- `is_default` (Boolean)
 - `updated_at` (String)
 - `username` (String) The account the image ships with — who to ssh in as.

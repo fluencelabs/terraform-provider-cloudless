@@ -36,7 +36,7 @@ func postJSON(t *testing.T, url, body string) int {
 func TestContractMiddleware_RejectsObjectFormSGCreate(t *testing.T) {
 	s := mock.New()
 	defer s.Close()
-	code := postJSON(t, s.URL+"/v1/security_groups", `{
+	code := postJSON(t, s.URL+"/v3/security-groups", `{
 		"clusterId": "`+probeClusterID+`",
 		"name": "x",
 		"ingressRules": {"type": "allow", "rules": []},
@@ -53,8 +53,8 @@ func TestContractMiddleware_AcceptsArraySGCreate(t *testing.T) {
 	rule := `{"type":"ipv4","protocolKind":{"tcp":{"ports":{"exact":{"value":22}}}},` +
 		`"remote":{"address":"0.0.0.0/0"}}`
 	body := `{"vpcId":"` + probeClusterID + `","name":"x",` +
-		`"ingressRules":[` + rule + `],"egressRules":null}`
-	if code := postJSON(t, s.URL+"/v1/security_groups", body); code == http.StatusBadRequest {
+		`"ingressRules":[` + rule + `]}`
+	if code := postJSON(t, s.URL+"/v3/security-groups", body); code == http.StatusBadRequest {
 		t.Fatalf("array-form SG create should pass the contract, got 400")
 	}
 }
@@ -72,13 +72,13 @@ func TestContractMiddleware_MockResponsesConform(t *testing.T) {
 	posts := []struct {
 		path, body string
 	}{
-		{"/v1/ssh_keys", `{"name":"k","publicKey":"ssh-ed25519 AAAA u@e"}`},
-		{"/v1/vpcs", `{"clusterId":"` + cid + `","name":"vpc"}`},
-		{"/v1/storages", `{"clusterId":"` + cid + `","name":"vol",` +
+		{"/v3/ssh-keys", `{"name":"k","publicKey":"ssh-ed25519 AAAA u@e"}`},
+		{"/v3/vpcs", `{"clusterId":"` + cid + `","name":"vpc"}`},
+		{"/v3/storages", `{"clusterId":"` + cid + `","name":"vol",` +
 			`"storageType":"NVME","volumeGb":40,"replicated":true}`},
-		{"/v1/public_ips", `{"clusterId":"` + cid + `","name":"ip","addressType":"V4"}`},
-		{"/v1/security_groups", `{"vpcId":"` + cid + `","name":"sg",` +
-			`"ingressRules":` + sgRule + `,"egressRules":null}`},
+		{"/v3/public-ips", `{"clusterId":"` + cid + `","name":"ip","addressType":"V4"}`},
+		{"/v3/security-groups", `{"vpcId":"` + cid + `","name":"sg",` +
+			`"ingressRules":` + sgRule + `}`},
 	}
 	for _, p := range posts {
 		if code := postJSON(t, s.URL+p.path, p.body); code >= 500 {
@@ -95,7 +95,7 @@ func TestContractMiddleware_MockResponsesConform(t *testing.T) {
 	if code := postJSON(t, s.URL+"/v3/vms", ""); code >= 500 {
 		t.Fatalf("POST /v3/vms returned %d", code)
 	}
-	for _, path := range []string{"/v1/clusters", "/v1/datacenters", "/v1/vpcs", "/v1/storages", "/v1/public_ips", "/v1/security_groups", "/v1/ssh_keys"} {
+	for _, path := range []string{"/v3/clusters", "/v3/datacenters", "/v3/vpcs", "/v3/storages", "/v3/public-ips", "/v3/security-groups", "/v3/ssh-keys"} {
 		if code := getJSON(t, s.URL+path); code >= 500 {
 			t.Fatalf("GET %s returned %d", path, code)
 		}

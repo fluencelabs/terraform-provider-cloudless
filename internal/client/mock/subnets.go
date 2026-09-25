@@ -45,11 +45,11 @@ func (s *Server) wireSubnets() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/subnets", s.handleSubnetCollection)
-	s.mux.HandleFunc("/v1/subnets/delete", s.handleSubnetBulkDelete)
+	s.mux.HandleFunc("/v3/subnets", s.handleSubnetCollection)
+	s.mux.HandleFunc("/v3/subnets/", s.handleSubnetItem)
 }
 
-// subnetCreatePathParts is the segment count of /v1/vpcs/{vpc_id}/subnets.
+// subnetCreatePathParts is the segment count of /v3/vpcs/{vpc_id}/subnets.
 const subnetCreatePathParts = 4
 
 // handleSubnetCreate serves POST /v1/vpcs/{vpc_id}/subnets; dispatched from
@@ -60,7 +60,7 @@ func (s *Server) handleSubnetCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := splitPath(r.URL.Path)
-	if len(parts) != subnetCreatePathParts || parts[0] != "v1" || parts[1] != "vpcs" || parts[3] != "subnets" {
+	if len(parts) != subnetCreatePathParts || parts[0] != "v3" || parts[1] != "vpcs" || parts[3] != "subnets" {
 		s.notFound(w, r)
 		return
 	}
@@ -128,24 +128,6 @@ func (s *Server) handleSubnetCollection(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (s *Server) handleSubnetBulkDelete(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		IDs []string `json:"ids"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	// The endpoint answers with the objects it deleted.
-	deleted := []map[string]any{}
-	s.mu.Lock()
-	for _, id := range body.IDs {
-		if rec, ok := s.subnetMap[id]; ok {
-			deleted = append(deleted, subnetWire(rec))
-			delete(s.subnetMap, id)
-		}
-	}
-	s.mu.Unlock()
-	s.writeJSON(w, http.StatusOK, deleted)
-}
-
 func subnetWire(rec *subnetRecord) map[string]any {
 	out := map[string]any{
 		"id":        rec.ID,
@@ -164,4 +146,46 @@ func subnetWire(rec *subnetRecord) map[string]any {
 		out["ipv6Cidr"] = rec.IPv6
 	}
 	return out
+}
+
+// handleSubnetItem serves PATCH and DELETE on /v3/subnets/{id}.
+func (s *Server) handleSubnetItem(w http.ResponseWriter, r *http.Request) {
+	parts := splitPath(r.URL.Path)
+	if len(parts) != resourcePathParts {
+		s.notFound(w, r)
+		return
+	}
+	id := parts[2]
+	var body struct {
+		Name   *string `json:"name"`
+		Egress *bool   `json:"egress"`
+	}
+	if r.Method == http.MethodPatch {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.subnetMap[id]
+	if !ok {
+		s.writeError(w, "subnet not found")
+		return
+	}
+	switch r.Method {
+	case http.MethodPatch:
+		if body.Name != nil {
+			rec.Name = *body.Name
+		}
+		if body.Egress != nil {
+			rec.Egress = *body.Egress
+		}
+	case http.MethodDelete:
+		wire := subnetWire(rec)
+		delete(s.subnetMap, id)
+		s.writeJSON(w, http.StatusOK, wire)
+		return
+	default:
+		s.notFound(w, r)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, subnetWire(rec))
 }

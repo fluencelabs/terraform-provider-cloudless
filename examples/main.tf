@@ -29,7 +29,6 @@ data "cloudless_default_image" "ubuntu" {
 locals {
   cluster_id      = data.cloudless_cluster.main.id
   small_config_id = data.cloudless_vm_configuration.small.id
-  ubuntu_image    = data.cloudless_default_image.ubuntu.download_url
 }
 
 resource "cloudless_ssh_key" "me" {
@@ -56,7 +55,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = local.ubuntu_image
+  image_id     = data.cloudless_default_image.ubuntu.id
 }
 
 resource "cloudless_vm" "example" {
