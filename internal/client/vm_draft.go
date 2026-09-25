@@ -6,28 +6,135 @@ import (
 	"net/http"
 )
 
-// /v3 draft lifecycle. A VM is created as a free draft with system defaults,
-// refined through per-aspect mutations, and turned into a live VM by
-// ProvisionVM. Everything after provision (read, rename, attach/detach data
-// disks, restart, terminate) stays on /v2 — /v3 has no live-VM verbs.
+// /v3 draft lifecycle. Since 0.14.0 a draft is created whole: one POST carries
+// the cluster, SKU, name, keys, boot disk, data disks and interfaces, and the
+// receipt names the resources the server created for it. ProvisionVM then
+// turns the saved draft into a live VM.
 // (graph @cloudless/fluence, node #1790)
 
-// CreateVMDraft creates a draft VM from system defaults (POST /v3/vms, no body).
-func (c *Client) CreateVMDraft(ctx context.Context) (*VM, error) {
-	var out VM
-	if err := c.do(ctx, http.MethodPost, "/v3/vms", nil, nil, &out); err != nil {
+// VMDraftRequest is PublicVmDraftRequest. An omitted field inherits the
+// platform default once; omitted Interfaces means one automatic interface,
+// while an empty slice asks for none.
+type VMDraftRequest struct {
+	ClusterID       string           `json:"clusterId,omitempty"`
+	ConfigurationID string           `json:"configurationId,omitempty"`
+	Name            string           `json:"name,omitempty"`
+	SSHKeyIDs       []string         `json:"sshKeyIds,omitempty"`
+	CloudInit       string           `json:"cloudInit,omitempty"`
+	BootDisk        *DraftBootDisk   `json:"bootDisk,omitempty"`
+	DataDisks       []DraftDataDisk  `json:"dataDisks,omitempty"`
+	Interfaces      []DraftInterface `json:"interfaces,omitempty"`
+}
+
+// DraftBootDisk is PublicDraftBootDisk: an existing Ready storage, or a new
+// disk built from an image source.
+type DraftBootDisk struct {
+	StorageID string
+	VolumeGb  uint32
+	Name      string
+	Source    ImageSource
+}
+
+func (d DraftBootDisk) MarshalJSON() ([]byte, error) {
+	if d.StorageID != "" {
+		return json.Marshal(map[string]any{"kind": "existing", "storageId": d.StorageID})
+	}
+	out := map[string]any{"kind": "new", "volumeGb": d.VolumeGb, "source": d.Source}
+	if d.Name != "" {
+		out["name"] = d.Name
+	}
+	return json.Marshal(out)
+}
+
+// DraftDataDisk is PublicDraftDataDisk; only the existing-disk variant is
+// built here — the provider attaches disks that cloudless_storage manages.
+type DraftDataDisk struct {
+	StorageID string
+}
+
+func (d DraftDataDisk) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{"kind": "existing", "storageId": d.StorageID})
+}
+
+// ImageSource is the tagged PublicImageSource. Only the catalog variant is
+// built here: the http variant also needs a bootMode, and the provider has
+// nowhere to say one (graph @cloudless/fluence, node #1911).
+type ImageSource struct {
+	ImageID string
+}
+
+func (s ImageSource) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]string{"type": "catalog", "imageId": s.ImageID})
+}
+
+// CatalogImage names a boot image by its catalog id.
+func CatalogImage(id string) ImageSource { return ImageSource{ImageID: id} }
+
+// DraftInterface is PublicDraftInterface: private binds a subnet, public
+// creates an address of AddressType.
+type DraftInterface struct {
+	Public          bool
+	SubnetID        string
+	AddressType     string
+	SecurityGroupID string
+	StaticIPs       []string
+	Default         bool
+}
+
+func (i DraftInterface) MarshalJSON() ([]byte, error) {
+	out := map[string]any{}
+	if i.Default {
+		out["default"] = true
+	}
+	if i.Public {
+		out["kind"] = "public"
+		if i.AddressType != "" {
+			out["addressType"] = i.AddressType
+		}
+		return json.Marshal(out)
+	}
+	out["kind"] = "private"
+	out["subnetId"] = i.SubnetID
+	if i.SecurityGroupID != "" {
+		out["securityGroupId"] = i.SecurityGroupID
+	}
+	if len(i.StaticIPs) > 0 {
+		out["staticIps"] = i.StaticIPs
+	}
+	return json.Marshal(out)
+}
+
+// CreatedVM is the CreatedVm receipt: the draft's id, the status it was
+// accepted in, and the resources the server created for it — the public IPs
+// there are the ones a discarded draft must release.
+type CreatedVM struct {
+	ID               string      `json:"id"`
+	AcceptedStatus   string      `json:"acceptedStatus"`
+	CreatedResources ResourceIDs `json:"createdResources"`
+}
+
+type ResourceIDs struct {
+	StorageIDs  []string `json:"storageIds"`
+	PublicIPIDs []string `json:"publicIpIds"`
+}
+
+// CreateVMDraft creates a draft VM from one request (POST /v3/vms, 201).
+func (c *Client) CreateVMDraft(ctx context.Context, req VMDraftRequest) (*CreatedVM, error) {
+	var out CreatedVM
+	if err := c.do(ctx, http.MethodPost, "/v3/vms", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// UpdateDraftVMRequest is the body of PATCH /v3/vms/{id}: name and SKU only.
-type UpdateDraftVMRequest struct {
+// UpdateVMRequest is the body of PATCH /v3/vms/{id}: name and SKU. The SKU is
+// immutable once provisioned; renaming follows the live VM's own state rules.
+type UpdateVMRequest struct {
 	Name            *string `json:"name,omitempty"`
 	ConfigurationID *string `json:"configurationId,omitempty"`
 }
 
-func (c *Client) UpdateDraftVM(ctx context.Context, id string, req UpdateDraftVMRequest) (*VM, error) {
+func (c *Client) UpdateVM(ctx context.Context, id string, req UpdateVMRequest) (*VM, error) {
 	var out VM
 	if err := c.do(ctx, http.MethodPatch, "/v3/vms/"+id, nil, req, &out); err != nil {
 		return nil, err
@@ -35,98 +142,10 @@ func (c *Client) UpdateDraftVM(ctx context.Context, id string, req UpdateDraftVM
 	return &out, nil
 }
 
-// MoveDraftVMToCluster moves a draft and its draft sub-resources to another
-// cluster (POST /v3/vms/{id}/cluster). expectedUpdatedAt is the draft's
-// current updatedAt echoed verbatim: the server uses it as a revision fence.
-func (c *Client) MoveDraftVMToCluster(ctx context.Context, id, clusterID, expectedUpdatedAt string) (*VM, error) {
-	body := struct {
-		ClusterID         string `json:"clusterId"`
-		ExpectedUpdatedAt string `json:"expectedUpdatedAt"`
-	}{ClusterID: clusterID, ExpectedUpdatedAt: expectedUpdatedAt}
-	var out VM
-	if err := c.do(ctx, http.MethodPost, "/v3/vms/"+id+"/cluster", nil, body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ReplaceDraftSSHKeys replaces the draft's SSH key set wholesale
-// (PUT /v3/vms/{id}/ssh-keys).
-func (c *Client) ReplaceDraftSSHKeys(ctx context.Context, id string, keyIDs []string) (*VM, error) {
-	if keyIDs == nil {
-		keyIDs = []string{}
-	}
-	body := struct {
-		SSHKeys []string `json:"sshKeys"`
-	}{SSHKeys: keyIDs}
-	var out VM
-	if err := c.do(ctx, http.MethodPut, "/v3/vms/"+id+"/ssh-keys", nil, body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// DraftBootDisk is the untagged body of POST /v3/vms/{id}/boot-disk: either an
-// existing Ready storage ID (serialized as a bare JSON string) or a create
-// request for a new draft boot disk from a catalog image.
-type DraftBootDisk struct {
-	StorageID *string
-	Create    *CreateDraftBootDisk
-}
-
-type CreateDraftBootDisk struct {
-	VolumeGb uint32  `json:"volumeGb"`
-	Source   Source  `json:"source"`
-	Name     *string `json:"name,omitempty"`
-}
-
-// Source is the tagged DraftBootImageSourceRequest. Since 0.12.0 an untagged
-// imageId is refused. The other variant of the tag — an HTTPS image URL the
-// cluster imports — is not built here: on 0.13.0 it also requires a bootMode,
-// and the provider has nowhere to say one yet
-// (graph @cloudless/fluence, node #1911).
-type Source struct {
-	ImageID string
-}
-
-func (s Source) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]string{"type": "catalog", "imageId": s.ImageID})
-}
-
-// CatalogImage names a boot image by its catalog id.
-func CatalogImage(id string) Source { return Source{ImageID: id} }
-
-func (b DraftBootDisk) MarshalJSON() ([]byte, error) {
-	if b.StorageID != nil {
-		return json.Marshal(*b.StorageID)
-	}
-	return json.Marshal(b.Create)
-}
-
-// ReplaceDraftBootDisk replaces the draft's boot disk. A draft-created disk is
-// hard-deleted by the server; a selected Ready disk survives.
-func (c *Client) ReplaceDraftBootDisk(ctx context.Context, id string, disk DraftBootDisk) (*Storage, error) {
-	var out Storage
-	if err := c.do(ctx, http.MethodPost, "/v3/vms/"+id+"/boot-disk", nil, disk, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// AttachDraftDataDisk attaches an existing data disk to a draft
-// (POST /v3/vms/{id}/storages, AddDataDiskRequestBody: a bare storage-ID
-// string selects the existing-disk variant).
-func (c *Client) AttachDraftDataDisk(ctx context.Context, id, storageID string) (*Storage, error) {
-	var out Storage
-	if err := c.do(ctx, http.MethodPost, "/v3/vms/"+id+"/storages", nil, storageID, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // ProvisionVM turns a draft into a live VM (POST /v3/vms/{id}/provision). The
 // server prices the draft graph, checks the balance and moves the VM and its
-// draft sub-resources Draft -> New; readiness is then polled on /v2.
+// draft sub-resources Draft -> New. A successful answer does not mean the VM
+// is running; readiness is polled afterwards.
 func (c *Client) ProvisionVM(ctx context.Context, id string) (*VM, error) {
 	var out VM
 	if err := c.do(ctx, http.MethodPost, "/v3/vms/"+id+"/provision", nil, nil, &out); err != nil {

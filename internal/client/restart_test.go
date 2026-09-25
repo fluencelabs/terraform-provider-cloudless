@@ -53,12 +53,11 @@ func TestRestartVM_ClearsRestartRequired(t *testing.T) {
 // seedLiveVM provisions a VM through the /v3 draft flow with an existing boot
 // disk and returns the live VM.
 func seedLiveVM(ctx context.Context, c *client.Client, bootStorageID string) (*client.VM, error) {
-	draft, err := c.CreateVMDraft(ctx)
+	draft, err := c.CreateVMDraft(ctx, client.VMDraftRequest{
+		BootDisk: &client.DraftBootDisk{StorageID: bootStorageID},
+	})
 	if err != nil {
 		return nil, err
-	}
-	if _, berr := c.ReplaceDraftBootDisk(ctx, draft.ID, client.DraftBootDisk{StorageID: &bootStorageID}); berr != nil {
-		return nil, berr
 	}
 	return c.ProvisionVM(ctx, draft.ID)
 }

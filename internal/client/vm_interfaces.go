@@ -8,63 +8,61 @@ import (
 
 // VM network interfaces. A VM owns a list of interfaces; each is either
 // private (bound to a subnet) or public (a public IP modeled as an interface).
-// Security groups and static IPs are per interface, not per VM.
+// Security groups and static IPs are per interface, not per VM. Since 0.14.0
+// the view is flat — kind is a word, and the subnet, address and group are
+// fields beside it.
 // (graph @cloudless/fluence, node #1809)
 
-// VMInterface mirrors VmNetworkInterfaceDto.
+// Interface kinds as PublicInterfaceKind names them. A draft interface that
+// binds nothing yet is "unbound".
+const (
+	interfaceKindPrivate = "private"
+	interfaceKindPublic  = "public"
+)
+
+// VMInterface mirrors PublicInterfaceView.
 type VMInterface struct {
-	ID              string        `json:"id"`
-	Default         bool          `json:"default"`
-	Kind            InterfaceKind `json:"kind"`
-	SecurityGroupID *string       `json:"securityGroup,omitempty"`
-	StaticIPs       []string      `json:"staticIps"`
-	AssignedIPs     []string      `json:"assignedIps"`
-}
-
-// InterfaceKind is the NetworkInterfaceKindDto oneOf: exactly one of Private
-// or Public is set. A private interface may have no subnet while the VM is a
-// draft.
-type InterfaceKind struct {
-	Private *PrivateInterface `json:"private,omitempty"`
-	Public  *PublicInterface  `json:"public,omitempty"`
-}
-
-type PrivateInterface struct {
-	Subnet *string `json:"subnet"`
-}
-
-type PublicInterface struct {
-	PublicIP string `json:"public_ip"`
+	ID              string   `json:"id"`
+	Kind            string   `json:"kind"`
+	Default         bool     `json:"default"`
+	SubnetIDValue   *string  `json:"subnetId"`
+	PublicIPIDValue *string  `json:"publicIpId"`
+	SecurityGroupID *string  `json:"securityGroupId"`
+	DesiredIPs      []string `json:"desiredIps"`
+	AssignedIPs     []string `json:"assignedIps"`
 }
 
 // IsPublic reports whether the interface carries a public IP.
-func (i VMInterface) IsPublic() bool { return i.Kind.Public != nil }
+func (i VMInterface) IsPublic() bool { return i.Kind == interfaceKindPublic }
 
 // SubnetID returns the private interface's subnet, or "" for public or
 // unbound interfaces.
 func (i VMInterface) SubnetID() string {
-	if i.Kind.Private != nil && i.Kind.Private.Subnet != nil {
-		return *i.Kind.Private.Subnet
+	if i.SubnetIDValue == nil {
+		return ""
 	}
-	return ""
+	return *i.SubnetIDValue
 }
 
 // PublicIPID returns the public interface's IP ID, or "".
 func (i VMInterface) PublicIPID() string {
-	if i.Kind.Public != nil {
-		return i.Kind.Public.PublicIP
+	if i.PublicIPIDValue == nil {
+		return ""
 	}
-	return ""
+	return *i.PublicIPIDValue
 }
 
-// ListVMInterfaces returns the VM's interfaces (GET /v2/vms/{id}/interfaces);
-// works for drafts and live VMs alike.
+// StaticIPs returns the addresses asked for on this interface.
+func (i VMInterface) StaticIPs() []string { return i.DesiredIPs }
+
+// ListVMInterfaces returns the VM's interfaces
+// (GET /v3/vms/{id}/interfaces); works for drafts and live VMs alike.
 func (c *Client) ListVMInterfaces(ctx context.Context, vmID string) ([]VMInterface, error) {
-	var out []VMInterface
-	if err := c.do(ctx, http.MethodGet, "/v2/vms/"+vmID+"/interfaces", nil, nil, &out); err != nil {
+	var out collection[VMInterface]
+	if err := c.do(ctx, http.MethodGet, "/v3/vms/"+vmID+"/interfaces", nil, nil, &out); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return out.Items, nil
 }
 
 // AddInterfaceRequest is the body of POST /v3/vms/{id}/interfaces. Exactly one
@@ -116,26 +114,23 @@ func (c *Client) RepointVMInterface(ctx context.Context, vmID, interfaceID, subn
 	body := struct {
 		Subnet string `json:"subnet"`
 	}{Subnet: subnetID}
-	var out VMInterface
-	if err := c.do(ctx, http.MethodPatch, "/v3/vms/"+vmID+"/interfaces/"+interfaceID, nil, body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
+	return c.patchInterface(ctx, vmID, interfaceID, body)
 }
 
-// SetVMInterfaceSecurityGroup binds (or with nil, unbinds) a security group
-// via PATCH /v2/vms/{id}/interfaces/{iface}. Observed on stage 0.11.2: an
-// absent securityGroupId leaves the binding unchanged, an explicit null
-// clears it — so the null form is always sent here.
+// SetVMInterfaceSecurityGroup binds (or with nil, unbinds) a security group.
+// An absent securityGroupId leaves the binding unchanged and an explicit null
+// clears it, so the null form is always sent here.
 func (c *Client) SetVMInterfaceSecurityGroup(ctx context.Context, vmID, interfaceID string, sgID *string) error {
 	body := struct {
 		SecurityGroupID *string `json:"securityGroupId"`
 	}{SecurityGroupID: sgID}
-	return c.do(ctx, http.MethodPatch, "/v2/vms/"+vmID+"/interfaces/"+interfaceID, nil, body, nil)
+	_, err := c.patchInterface(ctx, vmID, interfaceID, body)
+	return err
 }
 
 // SetVMInterfaceStaticIPs sets a draft private interface's static IPs; an
-// empty slice clears them.
+// empty slice clears them. The API refuses staticIps beside a non-null
+// security group, so the two are sent as separate patches.
 func (c *Client) SetVMInterfaceStaticIPs(ctx context.Context, vmID, interfaceID string, ips []string) error {
 	if ips == nil {
 		ips = []string{}
@@ -143,5 +138,14 @@ func (c *Client) SetVMInterfaceStaticIPs(ctx context.Context, vmID, interfaceID 
 	body := struct {
 		StaticIPs []string `json:"staticIps"`
 	}{StaticIPs: ips}
-	return c.do(ctx, http.MethodPatch, "/v2/vms/"+vmID+"/interfaces/"+interfaceID, nil, body, nil)
+	_, err := c.patchInterface(ctx, vmID, interfaceID, body)
+	return err
+}
+
+func (c *Client) patchInterface(ctx context.Context, vmID, interfaceID string, body any) (*VMInterface, error) {
+	var out VMInterface
+	if err := c.do(ctx, http.MethodPatch, "/v3/vms/"+vmID+"/interfaces/"+interfaceID, nil, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

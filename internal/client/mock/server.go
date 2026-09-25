@@ -72,7 +72,7 @@ type Server struct {
 	// the spec doesn't allow). Guarded by s.mu. Tests assert it stays empty.
 	contractViolations []string
 
-	// FailRemoveVMStorages, when set, makes /v2/vms/{id}/storages/remove return 500.
+	// FailRemoveVMStorages, when set, makes the data-disk detach fail.
 	FailRemoveVMStorages bool
 
 	// restartCount counts VM restart/softreboot calls. Guarded by s.mu; read via
@@ -138,7 +138,9 @@ func (s *Server) register(mux *http.ServeMux) {
 func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": "no route: " + r.Method + " " + r.URL.Path})
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": "no route: " + r.Method + " " + r.URL.Path, "code": "not_found",
+	})
 }
 
 // writeJSON is a tiny helper used by every concrete handler.
@@ -150,7 +152,7 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, body any) {
 
 // writeError writes a Fluence ErrorBody-shaped 404 JSON response.
 func (s *Server) writeError(w http.ResponseWriter, msg string) {
-	s.writeJSON(w, http.StatusNotFound, map[string]string{"error": msg})
+	s.writeJSON(w, http.StatusNotFound, map[string]string{"error": msg, "code": "not_found"})
 }
 
 // splitPath splits "/a/b/c" → ["a","b","c"].

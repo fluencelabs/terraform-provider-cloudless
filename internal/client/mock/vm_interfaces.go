@@ -3,23 +3,19 @@ package mock
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 )
-
-func readRaw(r *http.Request) ([]byte, error) { return io.ReadAll(r.Body) }
-
-// VM network interfaces, shared by the /v2 read/patch handlers and the /v3
-// draft/live mutation handlers. Mirrors the API's interface model: private
-// (subnet, static IPs) or public (public IP), one default per VM, security
-// group per interface.
 
 // defaultDraftSubnetID is the subnet a fresh draft's default interface binds
 // to, mirroring the server picking the VPC default subnet.
 const defaultDraftSubnetID = "00000000-0000-4000-8000-0000000005b1"
 
 // interfacesVerb is the /interfaces path segment shared by /v2 and /v3.
-const interfacesVerb = "interfaces"
+const (
+	interfacesVerb      = "interfaces"
+	interfaceKindPublic = "public"
+	interfaceKindHTTP   = "http"
+)
 
 type vmInterfaceRecord struct {
 	ID              string
@@ -38,28 +34,29 @@ func interfaceWire(ni vmInterfaceRecord) map[string]any {
 	m := map[string]any{
 		"id":          ni.ID,
 		"default":     ni.Default,
-		"staticIps":   ni.StaticIPs,
+		"desiredIps":  ni.StaticIPs,
 		"assignedIps": []string{},
 	}
 	if ni.StaticIPs == nil {
-		m["staticIps"] = []string{}
+		m["desiredIps"] = []string{}
 	}
-	if ni.PublicIP != "" {
-		m["kind"] = map[string]any{"public": map[string]any{"public_ip": ni.PublicIP}}
-	} else {
-		var subnet any
-		if ni.Subnet != "" {
-			subnet = ni.Subnet
-		}
-		m["kind"] = map[string]any{"private": map[string]any{"subnet": subnet}}
+	switch {
+	case ni.PublicIP != "":
+		m["kind"] = "public"
+		m["publicIpId"] = ni.PublicIP
+	case ni.Subnet != "":
+		m["kind"] = "private"
+		m["subnetId"] = ni.Subnet
+	default:
+		m["kind"] = "unbound"
 	}
 	if ni.SecurityGroupID != nil {
-		m["securityGroup"] = *ni.SecurityGroupID
+		m["securityGroupId"] = *ni.SecurityGroupID
 	}
 	return m
 }
 
-// GET /v2/vms/{id}/interfaces.
+// GET /v3/vms/{id}/interfaces.
 func (s *Server) listVMInterfaces(w http.ResponseWriter, rec *vmRecord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -67,49 +64,7 @@ func (s *Server) listVMInterfaces(w http.ResponseWriter, rec *vmRecord) {
 	for _, ni := range rec.Interfaces {
 		out = append(out, interfaceWire(ni))
 	}
-	s.writeJSON(w, http.StatusOK, out)
-}
-
-// PATCH /v2/vms/{id}/interfaces/{iface}: securityGroupId and/or staticIps.
-func (s *Server) patchVMInterface(w http.ResponseWriter, r *http.Request, rec *vmRecord, interfaceID string) {
-	var body struct {
-		SecurityGroupID *string  `json:"securityGroupId"`
-		StaticIPs       []string `json:"staticIps"`
-	}
-	raw, _ := readRaw(r)
-	_ = json.Unmarshal(raw, &body)
-	var keys map[string]json.RawMessage
-	_ = json.Unmarshal(raw, &keys)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range rec.Interfaces {
-		if rec.Interfaces[i].ID != interfaceID {
-			continue
-		}
-		if _, ok := keys["securityGroupId"]; ok {
-			rec.Interfaces[i].SecurityGroupID = body.SecurityGroupID
-			if rec.Status != draftStatus {
-				// Binding changes on a live VM take effect after a restart.
-				rec.RestartRequired = true
-			}
-		}
-		if _, ok := keys["staticIps"]; ok {
-			if rec.Status != draftStatus {
-				s.writeJSON(
-					w,
-					http.StatusUnprocessableEntity,
-					map[string]string{"error": "static IPs are draft-only", "code": "vm_not_draft"},
-				)
-				return
-			}
-			rec.Interfaces[i].StaticIPs = body.StaticIPs
-		}
-		// Observed on stage 0.11.2 and per the spec: the PATCH answers the
-		// whole VM, not the interface.
-		s.writeJSON(w, http.StatusOK, vmWire(rec))
-		return
-	}
-	s.writeError(w, "interface not found")
+	s.writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
 // POST /v3/vms/{id}/interfaces.
@@ -239,6 +194,9 @@ func (s *Server) updateVMInterfaceV3(w http.ResponseWriter, r *http.Request, rec
 			Type   string  `json:"type"`
 			Subnet *string `json:"subnet"`
 		} `json:"kind"`
+		// Absent and null differ: absent leaves the group alone, null clears it.
+		SecurityGroupID json.RawMessage `json:"securityGroupId"`
+		StaticIPs       []string        `json:"staticIps"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	s.mu.Lock()
@@ -249,6 +207,10 @@ func (s *Server) updateVMInterfaceV3(w http.ResponseWriter, r *http.Request, rec
 			continue
 		}
 		switch {
+		case body.SecurityGroupID != nil || body.StaticIPs != nil:
+			configureInterface(ni, body.SecurityGroupID, body.StaticIPs)
+			s.writeJSON(w, http.StatusOK, interfaceWire(*ni))
+			return
 		case body.Subnet != nil:
 			if ni.PublicIP != "" {
 				s.writeJSON(
@@ -325,5 +287,18 @@ func (s *Server) ReverseInterfaces() {
 		for i, j := 0, len(rec.Interfaces)-1; i < j; i, j = i+1, j-1 {
 			rec.Interfaces[i], rec.Interfaces[j] = rec.Interfaces[j], rec.Interfaces[i]
 		}
+	}
+}
+
+// configureInterface applies the "configure" patch kind: an absent
+// securityGroupId leaves the binding alone, an explicit null clears it.
+func configureInterface(ni *vmInterfaceRecord, sg json.RawMessage, staticIPs []string) {
+	if sg != nil {
+		var id *string
+		_ = json.Unmarshal(sg, &id)
+		ni.SecurityGroupID = id
+	}
+	if staticIPs != nil {
+		ni.StaticIPs = staticIPs
 	}
 }

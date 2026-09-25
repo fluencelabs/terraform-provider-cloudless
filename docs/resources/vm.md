@@ -99,7 +99,6 @@ resource "cloudless_vm" "app" {
 - `status` (String)
 - `subnet_ids` (List of String)
 - `updated_at` (String)
-- `user_id` (String)
 
 <a id="nestedblock--boot_disk"></a>
 ### Nested Schema for `boot_disk`

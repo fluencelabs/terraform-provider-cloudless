@@ -164,3 +164,20 @@ func storageWire(rec *storageRecord) map[string]any {
 		"createdAt":   "2026-01-01T00:00:00Z",
 	}
 }
+
+// publicStorageWire is PublicStorageDto — the shape /v3 answers with. It
+// stands beside storageWire while /v1 still serves the storage resource.
+func publicStorageWire(rec *storageRecord) map[string]any {
+	return map[string]any{
+		"id":            rec.ID,
+		"clusterId":     rec.ClusterID,
+		"name":          rec.Name,
+		"storageType":   rec.StorageType,
+		"status":        rec.Status,
+		"volumeGb":      rec.VolumeGb,
+		"replicated":    rec.Replicated,
+		"attachedVmIds": []string{},
+		"createdAt":     "2026-01-01T00:00:00Z",
+		"updatedAt":     "2026-01-01T00:00:00Z",
+	}
+}

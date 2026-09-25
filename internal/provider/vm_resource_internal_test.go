@@ -7,11 +7,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestBootDiskToAPI_WireShapes pins the two untagged variants of the /v3
-// boot-disk body: an existing storage is a bare JSON string, an inline create
-// is an object with volumeGb + a tagged source (+ name). The server matches by
-// shape, so a wrapped or mis-keyed body fails with "did not match any
-// variant"; since 0.12.0 an untagged imageId is refused outright.
+// TestBootDiskToAPI_WireShapes pins the two variants of the draft boot disk.
+// Since 0.14.0 both carry a kind tag — "existing" with a storage id, "new"
+// with volumeGb and a tagged image source (+ name).
 func TestBootDiskToAPI_WireShapes(t *testing.T) {
 	const storageID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	const imageID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -20,8 +18,9 @@ func TestBootDiskToAPI_WireShapes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("existing: %v", err)
 	}
-	if got, _ := json.Marshal(existing); string(got) != `"`+storageID+`"` {
-		t.Errorf("existing boot disk marshaled as %s, want bare string", got)
+	wantExisting := `{"kind":"existing","storageId":"` + storageID + `"}`
+	if got, _ := json.Marshal(existing); string(got) != wantExisting {
+		t.Errorf("existing boot disk marshaled as %s, want %s", got, wantExisting)
 	}
 
 	inline, err := bootDiskToAPI(&vmBootDiskModel{
@@ -34,7 +33,7 @@ func TestBootDiskToAPI_WireShapes(t *testing.T) {
 		t.Fatalf("inline: %v", err)
 	}
 	got, _ := json.Marshal(inline)
-	want := `{"volumeGb":40,"source":{"imageId":"` + imageID + `","type":"catalog"},"name":"boot"}`
+	want := `{"kind":"new","name":"boot","source":{"imageId":"` + imageID + `","type":"catalog"},"volumeGb":40}`
 	if string(got) != want {
 		t.Errorf("inline boot disk marshaled as %s, want %s", got, want)
 	}

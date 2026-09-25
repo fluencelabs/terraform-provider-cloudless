@@ -408,54 +408,37 @@ func (c *Client) DeleteSubnet(ctx context.Context, id string) error {
 
 // ---------- VMs ----------
 
+// VM mirrors PublicVmView. Since 0.14.0 the view names ids only: the subnets
+// and the public address live on the interfaces, not on the VM.
 type VM struct {
-	ID                string   `json:"id"`
-	UserID            string   `json:"userId"`
-	ClusterID         string   `json:"clusterId"`
-	ConfigurationID   string   `json:"configurationId"`
-	Name              string   `json:"name"`
-	Status            string   `json:"status"`
-	RestartRequired   bool     `json:"restartRequired"`
-	BootDisk          *string  `json:"bootDisk,omitempty"`
-	DataDisks         []string `json:"dataDisks"`
-	Subnets           []string `json:"subnets"`
-	SSHKeys           []string `json:"sshKeys"`
-	NetworkInterfaces []string `json:"networkInterfaces"`
-	PublicIP          *string  `json:"publicIp,omitempty"`
-	ReadySince        *string  `json:"readySince,omitempty"`
-	LastPaidAt        *string  `json:"lastPaidAt,omitempty"`
-	PaidUntil         *string  `json:"paidUntil,omitempty"`
-	TerminatedAt      *string  `json:"terminatedAt,omitempty"`
-	CreatedAt         string   `json:"createdAt"`
-	UpdatedAt         string   `json:"updatedAt"`
+	ID              string     `json:"id"`
+	ClusterID       string     `json:"clusterId"`
+	ConfigurationID string     `json:"configurationId"`
+	Name            string     `json:"name"`
+	Status          string     `json:"status"`
+	RestartRequired bool       `json:"restartRequired"`
+	HasCloudInit    bool       `json:"hasCloudInit"`
+	BootDisk        *string    `json:"bootDiskId"`
+	DataDisks       []string   `json:"dataDiskIds"`
+	SSHKeys         []string   `json:"sshKeyIds"`
+	Interfaces      []string   `json:"interfaceIds"`
+	Failure         *VMFailure `json:"failure,omitempty"`
+	ReadySince      *string    `json:"readySince,omitempty"`
+	TerminatedAt    *string    `json:"terminatedAt,omitempty"`
+	CreatedAt       string     `json:"createdAt"`
+	UpdatedAt       string     `json:"updatedAt"`
 }
 
-type UpdateVMRequest struct {
-	Name *string `json:"name,omitempty"`
+// VMFailure is PublicVmFailure: why a VM did not come up.
+type VMFailure struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
-type vmsListResponse struct {
-	Items      []VM           `json:"items"`
-	Pagination PaginationInfo `json:"pagination"`
-}
-
+// GetVM reads one VM (GET /v3/vms/{id}); a terminated VM stays readable.
 func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
-	q := url.Values{"ids": {id}}
-	var resp vmsListResponse
-	if err := c.do(ctx, http.MethodGet, "/v2/vms", q, nil, &resp); err != nil {
-		return nil, err
-	}
-	for i := range resp.Items {
-		if resp.Items[i].ID == id {
-			return &resp.Items[i], nil
-		}
-	}
-	return nil, &APIError{StatusCode: http.StatusNotFound, Message: "vm not found"}
-}
-
-func (c *Client) UpdateVM(ctx context.Context, id string, req UpdateVMRequest) (*VM, error) {
 	var out VM
-	if err := c.do(ctx, http.MethodPatch, "/v2/vms/"+id, nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/vms/"+id, nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -467,23 +450,26 @@ func (c *Client) TerminateVM(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodPost, "/v3/vms/"+id+"/terminate", nil, nil, nil)
 }
 
-type vmStoragesBody struct {
-	DataDisks []string `json:"dataDisks"`
-}
-
+// AddVMStorages attaches data disks one by one (POST /v3/vms/{id}/storages);
+// a bare storage-id string selects the existing-disk variant of the body.
 func (c *Client) AddVMStorages(ctx context.Context, vmID string, storageIDs []string) error {
-	return c.do(ctx, http.MethodPost, "/v2/vms/"+vmID+"/storages/add", nil, vmStoragesBody{DataDisks: storageIDs}, nil)
+	for _, id := range storageIDs {
+		if err := c.do(ctx, http.MethodPost, "/v3/vms/"+vmID+"/storages", nil, id, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
+// RemoveVMStorages detaches data disks one by one
+// (DELETE /v3/vms/{id}/storages/{storage_id}).
 func (c *Client) RemoveVMStorages(ctx context.Context, vmID string, storageIDs []string) error {
-	return c.do(
-		ctx,
-		http.MethodPost,
-		"/v2/vms/"+vmID+"/storages/remove",
-		nil,
-		vmStoragesBody{DataDisks: storageIDs},
-		nil,
-	)
+	for _, id := range storageIDs {
+		if err := c.do(ctx, http.MethodDelete, "/v3/vms/"+vmID+"/storages/"+id, nil, nil, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RestartVM hard-restarts a live VM (POST /v3/vms/{id}/restart) and returns

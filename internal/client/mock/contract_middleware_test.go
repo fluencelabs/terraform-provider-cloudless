@@ -95,7 +95,7 @@ func TestContractMiddleware_MockResponsesConform(t *testing.T) {
 	if code := postJSON(t, s.URL+"/v3/vms", ""); code >= 500 {
 		t.Fatalf("POST /v3/vms returned %d", code)
 	}
-	for _, path := range []string{"/v1/clusters", "/v1/datacenters", "/v2/vms", "/v1/vpcs", "/v1/storages", "/v1/public_ips", "/v1/security_groups", "/v1/ssh_keys"} {
+	for _, path := range []string{"/v1/clusters", "/v1/datacenters", "/v1/vpcs", "/v1/storages", "/v1/public_ips", "/v1/security_groups", "/v1/ssh_keys"} {
 		if code := getJSON(t, s.URL+path); code >= 500 {
 			t.Fatalf("GET %s returned %d", path, code)
 		}

@@ -335,7 +335,11 @@ func validateNIC(i int, n vmNICModel) (bool, error) {
 // default interface is repointed to the default block's subnet, the other
 // blocks are added, then security groups and static IPs are set
 // (graph @cloudless/fluence, node #1811).
-func assembleDraftNICs(ctx context.Context, c *client.Client, vmID string, nics []vmNICModel) ([]string, error) {
+// draftInterfaces turns the network_interface blocks into the create body's
+// interface list. A block naming an existing public IP is left out: a draft
+// creates its own addresses and can only be handed one after it is live —
+// attachExistingPublicNICs does that after provision.
+func draftInterfaces(nics []vmNICModel) ([]client.DraftInterface, error) {
 	if len(nics) == 0 {
 		return nil, nil
 	}
@@ -343,14 +347,56 @@ func assembleDraftNICs(ctx context.Context, c *client.Client, vmID string, nics 
 	if err != nil {
 		return nil, err
 	}
-	if berr := bindDraftDefaultNIC(ctx, c, vmID, nics[dflt]); berr != nil {
-		return nil, berr
+	out := []client.DraftInterface{}
+	for i, n := range nics {
+		if nicAttachesExistingIP(n) {
+			continue
+		}
+		iface := client.DraftInterface{
+			Public:          nicIsPublic(n),
+			AddressType:     n.AddressType.ValueString(),
+			SubnetID:        n.SubnetID.ValueString(),
+			SecurityGroupID: n.SecurityGroupID.ValueString(),
+			StaticIPs:       stringsFromList(n.StaticIPs),
+			Default:         i == dflt,
+		}
+		if !knownString(n.SubnetID) && !iface.Public {
+			if i != dflt {
+				return nil, fmt.Errorf("network_interface[%d]: a private interface needs subnet_id", i)
+			}
+			// The default block names no subnet, and the create body's private
+			// variant requires one. Ask for nothing: the server then gives the
+			// draft its automatic default interface, and the remaining blocks
+			// are added to the draft afterwards.
+			return nil, nil
+		}
+		out = append(out, iface)
+	}
+	return out, nil
+}
+
+// addDraftNICs adds the blocks the create body could not carry — used when the
+// default block named no subnet, so the draft was created with the server's
+// automatic interface and nothing else.
+func addDraftNICs(ctx context.Context, c *client.Client, vmID string, nics []vmNICModel) ([]string, error) {
+	dflt, err := validateNICs(nics)
+	if err != nil {
+		return nil, err
+	}
+	current, err := c.ListVMInterfaces(ctx, vmID)
+	if err != nil {
+		return nil, fmt.Errorf("list draft interfaces: %w", err)
 	}
 	var ownedIPs []string
+	for i := range current {
+		if current[i].Default && !current[i].IsPublic() {
+			if serr := applyNICSettings(ctx, c, vmID, current[i].ID, nics[dflt], true); serr != nil {
+				return nil, serr
+			}
+		}
+	}
 	for i, n := range nics {
 		if i == dflt || nicAttachesExistingIP(n) {
-			// An existing public IP can only be attached to a live VM; see
-			// attachExistingPublicNICs after provision.
 			continue
 		}
 		iface, aerr := c.AddVMInterface(ctx, vmID, addRequestFor(n, true))
@@ -365,33 +411,6 @@ func assembleDraftNICs(ctx context.Context, c *client.Client, vmID string, nics 
 		}
 	}
 	return ownedIPs, nil
-}
-
-// bindDraftDefaultNIC repoints the server's default interface to the default
-// block's subnet and applies that block's settings.
-func bindDraftDefaultNIC(ctx context.Context, c *client.Client, vmID string, dflt vmNICModel) error {
-	current, err := c.ListVMInterfaces(ctx, vmID)
-	if err != nil {
-		return fmt.Errorf("list draft interfaces: %w", err)
-	}
-	var serverDefault *client.VMInterface
-	for i := range current {
-		if current[i].Default {
-			serverDefault = &current[i]
-		}
-	}
-	if serverDefault == nil {
-		return errors.New("draft has no default interface")
-	}
-	// A default block without subnet_id keeps whatever subnet the API gave
-	// the draft — that is the point of leaving it out.
-	want := dflt.SubnetID.ValueString()
-	if knownString(dflt.SubnetID) && serverDefault.SubnetID() != want {
-		if _, rerr := c.RepointVMInterface(ctx, vmID, serverDefault.ID, want); rerr != nil {
-			return fmt.Errorf("bind default interface to subnet %s: %w", want, rerr)
-		}
-	}
-	return applyNICSettings(ctx, c, vmID, serverDefault.ID, dflt, true)
 }
 
 // attachExistingPublicNICs attaches the blocks that reference an existing
@@ -823,8 +842,8 @@ func nicFromAPI(f client.VMInterface, prev vmNICModel, matched bool) vmNICModel 
 	}
 	// static_ips is what the API reports; a configured list the API did not
 	// apply must not be echoed back as if it had been.
-	if len(f.StaticIPs) > 0 {
-		n.StaticIPs = listFromStrings(f.StaticIPs)
+	if ips := f.StaticIPs(); len(ips) > 0 {
+		n.StaticIPs = listFromStrings(ips)
 	} else if matched && !prev.StaticIPs.IsNull() && !prev.StaticIPs.IsUnknown() && len(prev.StaticIPs.Elements()) == 0 {
 		n.StaticIPs = prev.StaticIPs // keep an explicit empty list stable
 	}

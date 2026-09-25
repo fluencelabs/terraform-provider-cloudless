@@ -46,7 +46,6 @@ type vmModel struct {
 	SSHKeyIDs   types.List       `tfsdk:"ssh_key_ids"`
 
 	Status            types.String `tfsdk:"status"`
-	UserID            types.String `tfsdk:"user_id"`
 	BootDiskID        types.String `tfsdk:"boot_disk_id"`
 	Subnets           types.List   `tfsdk:"subnet_ids"`
 	NetworkInterfaces types.List   `tfsdk:"network_interface_ids"`
@@ -111,7 +110,6 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 				Validators: []validator.List{listvalidator.ValueStringsAre(validators.UUID())},
 			},
 			"status":       schema.StringAttribute{Computed: true},
-			"user_id":      schema.StringAttribute{Computed: true},
 			"boot_disk_id": schema.StringAttribute{Computed: true},
 			"subnet_ids": schema.ListAttribute{
 				ElementType:   types.StringType,
@@ -179,22 +177,20 @@ func bootDiskToAPI(d *vmBootDiskModel) (client.DraftBootDisk, error) {
 	if d == nil {
 		return client.DraftBootDisk{}, errors.New("boot_disk block is required")
 	}
-	if !d.StorageID.IsNull() && !d.StorageID.IsUnknown() && d.StorageID.ValueString() != "" {
-		s := d.StorageID.ValueString()
-		return client.DraftBootDisk{StorageID: &s}, nil
+	if knownString(d.StorageID) {
+		return client.DraftBootDisk{StorageID: d.StorageID.ValueString()}, nil
 	}
 	if d.VolumeGb.IsNull() || d.ImageID.IsNull() {
 		return client.DraftBootDisk{}, errors.New("inline boot_disk requires volume_gb and image_id")
 	}
-	create := &client.CreateDraftBootDisk{
+	disk := client.DraftBootDisk{
 		VolumeGb: uint32(d.VolumeGb.ValueInt64()),
 		Source:   client.CatalogImage(d.ImageID.ValueString()),
 	}
-	if !d.Name.IsNull() && d.Name.ValueString() != "" {
-		n := d.Name.ValueString()
-		create.Name = &n
+	if knownString(d.Name) {
+		disk.Name = d.Name.ValueString()
 	}
-	return client.DraftBootDisk{Create: create}, nil
+	return disk, nil
 }
 
 // (stringsFromList and listFromStrings live in util.go for use by other resources.)
@@ -293,55 +289,48 @@ func (r *vmResource) createDraft(
 	plan *vmModel,
 	bd client.DraftBootDisk,
 ) (string, []string, error) {
-	draft, err := r.c.CreateVMDraft(ctx)
+	nics, err := draftInterfaces(plan.NICs)
+	if err != nil {
+		return "", nil, err
+	}
+	req := client.VMDraftRequest{
+		ClusterID:       plan.ClusterID.ValueString(),
+		ConfigurationID: plan.ConfigurationID.ValueString(),
+		Name:            plan.Name.ValueString(),
+		BootDisk:        &bd,
+		Interfaces:      nics,
+	}
+	// The server seeds a draft with all of the user's SSH keys; only override
+	// when the plan names a set, so an omitted ssh_key_ids keeps that default.
+	if !plan.SSHKeyIDs.IsNull() {
+		req.SSHKeyIDs = stringsFromList(plan.SSHKeyIDs)
+	}
+	for _, storageID := range stringsFromList(plan.DataDiskIDs) {
+		req.DataDisks = append(req.DataDisks, client.DraftDataDisk{StorageID: storageID})
+	}
+
+	draft, err := r.c.CreateVMDraft(ctx, req)
 	if err != nil {
 		return "", nil, fmt.Errorf("create draft: %w", err)
 	}
 	id := draft.ID
+	// Public IPs the draft created for itself, named by the receipt; released
+	// on discard because the draft delete's cascade is unobserved
+	// (graph @cloudless/fluence, node #1814) and a leaked address bills.
+	ownedIPs := draft.CreatedResources.PublicIPIDs
 
-	// Public IPs the draft created for itself; released on discard because
-	// the draft delete's cascade is unobserved (graph @cloudless/fluence,
-	// node #1814) and a leaked address bills.
-	var ownedIPs []string
-	discard := func(step string, err error) error { return r.discardDraft(ctx, id, ownedIPs, step, err) }
-
-	if want := plan.ClusterID.ValueString(); want != draft.ClusterID {
-		if _, merr := r.c.MoveDraftVMToCluster(ctx, id, want, draft.UpdatedAt); merr != nil {
-			return "", nil, discard("move draft to cluster", merr)
+	if len(nics) == 0 && len(plan.NICs) > 0 {
+		// The create body could not carry the blocks (see draftInterfaces);
+		// the draft holds the server's automatic interface, add the rest.
+		added, aerr := addDraftNICs(ctx, r.c, id, plan.NICs)
+		ownedIPs = append(ownedIPs, added...)
+		if aerr != nil {
+			return "", nil, r.discardDraft(ctx, id, ownedIPs, "assemble network interfaces", aerr)
 		}
-	}
-
-	name := plan.Name.ValueString()
-	cfg := plan.ConfigurationID.ValueString()
-	if _, uerr := r.c.UpdateDraftVM(ctx, id, client.UpdateDraftVMRequest{Name: &name, ConfigurationID: &cfg}); uerr != nil {
-		return "", nil, discard("set draft name/configuration", uerr)
-	}
-
-	if _, berr := r.c.ReplaceDraftBootDisk(ctx, id, bd); berr != nil {
-		return "", nil, discard("set draft boot disk", berr)
-	}
-
-	// The server seeds a draft with all of the user's SSH keys; only override
-	// when the plan names a set, so an omitted ssh_key_ids keeps that default.
-	if !plan.SSHKeyIDs.IsNull() {
-		if _, kerr := r.c.ReplaceDraftSSHKeys(ctx, id, stringsFromList(plan.SSHKeyIDs)); kerr != nil {
-			return "", nil, discard("set draft ssh keys", kerr)
-		}
-	}
-
-	for _, storageID := range stringsFromList(plan.DataDiskIDs) {
-		if _, serr := r.c.AttachDraftDataDisk(ctx, id, storageID); serr != nil {
-			return "", nil, discard("attach data disk "+storageID, serr)
-		}
-	}
-
-	var nerr error
-	if ownedIPs, nerr = assembleDraftNICs(ctx, r.c, id, plan.NICs); nerr != nil {
-		return "", nil, discard("assemble network interfaces", nerr)
 	}
 
 	if _, perr := r.c.ProvisionVM(ctx, id); perr != nil && !r.provisionLanded(ctx, id, perr) {
-		return "", nil, discard("provision", perr)
+		return "", nil, r.discardDraft(ctx, id, ownedIPs, "provision", perr)
 	}
 	return id, ownedIPs, nil
 }
@@ -622,7 +611,6 @@ func (r *vmResource) ModifyPlan(
 func (r *vmResource) fillMinimal(m *vmModel, id string, ownedIPs []string) {
 	m.ID = types.StringValue(id)
 	m.Status = types.StringValue("unknown")
-	m.UserID = types.StringValue("")
 	m.BootDiskID = types.StringNull()
 	m.DataDiskIDs = listFromStrings(nil)
 	m.Subnets = listFromStrings(nil)
@@ -664,6 +652,19 @@ func (r *vmResource) fillWithNICs(ctx context.Context, m *vmModel, v *client.VM)
 	} else {
 		m.NICs = nicsFromAPI(m.NICs, ifaces)
 	}
+	// Since 0.14.0 the VM view names its interfaces and nothing more: the
+	// subnets it sits on and the address it answers at are read off them.
+	var subnets []string
+	m.PublicIPID = types.StringNull()
+	for _, f := range ifaces {
+		if sub := f.SubnetID(); sub != "" {
+			subnets = append(subnets, sub)
+		}
+		if ip := f.PublicIPID(); ip != "" {
+			m.PublicIPID = types.StringValue(ip)
+		}
+	}
+	m.Subnets = listFromStrings(sortedCopy(subnets))
 	return diags
 }
 
@@ -686,14 +687,11 @@ func (r *vmResource) fill(m *vmModel, v *client.VM) {
 	m.ConfigurationID = types.StringValue(v.ConfigurationID)
 	m.Name = types.StringValue(v.Name)
 	m.Status = types.StringValue(v.Status)
-	m.UserID = types.StringValue(v.UserID)
 	m.BootDiskID = stringFromPtr(v.BootDisk)
 	m.DataDiskIDs = listFromStrings(v.DataDisks)
 	// The API lists these in arbitrary order (it changes across a restart);
 	// sort so the computed mirrors are stable between plan and apply.
-	m.Subnets = listFromStrings(sortedCopy(v.Subnets))
-	m.NetworkInterfaces = listFromStrings(sortedCopy(v.NetworkInterfaces))
-	m.PublicIPID = stringFromPtr(v.PublicIP)
+	m.NetworkInterfaces = listFromStrings(sortedCopy(v.Interfaces))
 	m.RestartRequired = types.BoolValue(v.RestartRequired)
 	m.CreatedAt = types.StringValue(v.CreatedAt)
 	m.UpdatedAt = types.StringValue(v.UpdatedAt)
