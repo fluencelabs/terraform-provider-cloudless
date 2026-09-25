@@ -56,7 +56,7 @@ func validateBody(
 
 func TestContract_SGCreate_AllowListedArray(t *testing.T) {
 	v := newContractValidator(t)
-	ok, msg := validateBody(t, v, "/v1/security_groups", client.CreateSecurityGroupRequest{
+	ok, msg := validateBody(t, v, "/v3/security-groups", client.CreateSecurityGroupRequest{
 		VPCID: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
 		Name:  "web",
 		IngressRules: client.RulesToCreateField(client.SecurityGroupRules{
@@ -72,7 +72,7 @@ func TestContract_SGCreate_AllowListedArray(t *testing.T) {
 
 func TestContract_SGCreate_AllowAllOmitsFields(t *testing.T) {
 	v := newContractValidator(t)
-	ok, msg := validateBody(t, v, "/v1/security_groups", client.CreateSecurityGroupRequest{
+	ok, msg := validateBody(t, v, "/v3/security-groups", client.CreateSecurityGroupRequest{
 		VPCID:        "3fa85f64-5717-4562-b3fc-2c963f66afa6",
 		Name:         "web",
 		IngressRules: client.RulesToCreateField(client.SecurityGroupRules{Mode: "allowAll"}),
@@ -94,7 +94,7 @@ func TestContract_SGCreate_ObjectFormRejected(t *testing.T) {
 		"ingressRules": map[string]any{"type": "allow", "rules": []any{}},
 		"egressRules":  map[string]any{"type": "allowAll"},
 	}
-	ok, _ := validateBody(t, v, "/v1/security_groups", objectForm)
+	ok, _ := validateBody(t, v, "/v3/security-groups", objectForm)
 	if ok {
 		t.Fatalf("object-form ingressRules must violate the contract (API wants an array)")
 	}
@@ -102,7 +102,7 @@ func TestContract_SGCreate_ObjectFormRejected(t *testing.T) {
 
 func TestContract_SGCreate_DenyAllEmptyArray(t *testing.T) {
 	v := newContractValidator(t)
-	ok, msg := validateBody(t, v, "/v1/security_groups", client.CreateSecurityGroupRequest{
+	ok, msg := validateBody(t, v, "/v3/security-groups", client.CreateSecurityGroupRequest{
 		VPCID: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
 		Name:  "locked",
 		IngressRules: client.RulesToCreateField(client.SecurityGroupRules{
@@ -118,7 +118,7 @@ func TestContract_SGCreate_DenyAllEmptyArray(t *testing.T) {
 
 func TestContract_SSHKeyCreate(t *testing.T) {
 	v := newContractValidator(t)
-	ok, msg := validateBody(t, v, "/v1/ssh_keys", client.CreateSSHKeyRequest{
+	ok, msg := validateBody(t, v, "/v3/ssh-keys", client.CreateSSHKeyRequest{
 		Name:      "my-key",
 		PublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKgJIjnDg1Djq u@e",
 	})
@@ -129,7 +129,7 @@ func TestContract_SSHKeyCreate(t *testing.T) {
 
 func TestContract_StorageCreate(t *testing.T) {
 	v := newContractValidator(t)
-	ok, msg := validateBody(t, v, "/v1/storages", client.CreateStorageRequest{
+	ok, msg := validateBody(t, v, "/v3/storages", client.CreateStorageRequest{
 		ClusterID:   "3fa85f64-5717-4562-b3fc-2c963f66afa6",
 		Name:        "data-vol",
 		StorageType: "NVME",
