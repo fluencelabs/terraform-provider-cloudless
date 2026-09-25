@@ -25,7 +25,10 @@ func publicIPDestroy() func(*terraform.State) error {
 
 func TestAccPublicIP_RealAPI(t *testing.T) {
 	factories := acctest.Setup(t)
-	name := "tf-acc-pip-" + tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
+	// A v3 name is at most 25 characters, so the rename has to fit too.
+	suffix := tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
+	name := "tf-acc-pip-" + suffix
+	renamed := "tf-acc-pip2-" + suffix
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: factories,
@@ -66,8 +69,8 @@ resource "cloudless_public_ip" "edge" {
   name         = %q
   address_type = "V4"
 }
-`, name+"-renamed"),
-				Check: resource.TestCheckResourceAttr("cloudless_public_ip.edge", "name", name+"-renamed"),
+`, renamed),
+				Check: resource.TestCheckResourceAttr("cloudless_public_ip.edge", "name", renamed),
 			},
 			{
 				ResourceName:      "cloudless_public_ip.edge",

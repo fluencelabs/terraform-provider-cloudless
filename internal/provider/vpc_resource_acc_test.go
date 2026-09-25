@@ -26,8 +26,10 @@ func vpcDestroy() func(*terraform.State) error {
 func TestAccVPC_RealAPI(t *testing.T) {
 	factories := acctest.Setup(t)
 	acctest.SkipUnlessVPCWrite(t, acctest.FirstClusterID(t))
-	name := "tf-acc-vpc-" + tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
-	renamed := name + "-renamed"
+	// A v3 name is at most 25 characters, so the rename has to fit too.
+	suffix := tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
+	name := "tf-acc-vpc-" + suffix
+	renamed := "tf-acc-vpc2-" + suffix
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: factories,
