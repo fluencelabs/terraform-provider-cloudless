@@ -100,7 +100,7 @@ info:
   license:
     name: AGPL-3
     identifier: AGPL-3
-  version: 0.12.0
+  version: 0.13.1
 paths:
   /v1/billing/charges/aggregated:
     get:
@@ -4485,14 +4485,15 @@ paths:
                 error: subnet CIDR overlaps the IPv4 range reserved for the default
                   subnet
         '422':
-          description: Egress was requested for an IPv6-only subnet (`ipv6_egress_unsupported`)
+          description: No CIDR was provided (`subnet_cidr_required`), or egress was
+            requested for an IPv6-only subnet (`ipv6_egress_unsupported`)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: ipv6_egress_unsupported
-                error: egress is not supported on IPv6-only subnets
+                code: subnet_cidr_required
+                error: At least one of ipv4Cidr or ipv6Cidr is required
         '500':
           description: Internal Server Error
           content:
@@ -9391,30 +9392,48 @@ components:
           format: u-int32
           minimum: 0
     CreateUserSubnetRequest:
-      type: object
-      required:
-      - name
-      properties:
-        egress:
-          type:
-          - boolean
-          - 'null'
-          description: Outbound internet access; omitted means enabled, but IPv6-only
-            subnets must set false.
-          default: true
-        ipv4Cidr:
-          type:
-          - string
-          - 'null'
-          example: 10.0.0.0/24
-        ipv6Cidr:
-          type:
-          - string
-          - 'null'
-          example: 2001:db8::/64
-        name:
-          type: string
-      additionalProperties: false
+      allOf:
+      - type: object
+        required:
+        - name
+        properties:
+          egress:
+            type:
+            - boolean
+            - 'null'
+            description: Outbound internet access; omitted means enabled, but IPv6-only
+              subnets must set false.
+          ipv4Cidr:
+            type:
+            - string
+            - 'null'
+            example: 10.0.0.0/24
+          ipv6Cidr:
+            type:
+            - string
+            - 'null'
+            example: 2001:db8::/64
+          name:
+            type: string
+        additionalProperties: false
+      - anyOf:
+        - type: object
+          required:
+          - ipv4Cidr
+          properties:
+            ipv4Cidr:
+              type: string
+        - type: object
+          required:
+          - ipv6Cidr
+          - egress
+          properties:
+            egress:
+              type: boolean
+              enum:
+              - false
+            ipv6Cidr:
+              type: string
     CreateUserVmRequest:
       type: object
       required:
@@ -9658,7 +9677,13 @@ components:
         required:
         - type
         - url
+        - bootMode
         properties:
+          bootMode:
+            type: string
+            enum:
+            - BIOS
+            - EFI
           type:
             type: string
             enum:
@@ -9669,10 +9694,9 @@ components:
             description: Canonical HTTPS image URI, preserved exactly; URLs requiring
               normalization are rejected. The path must end in a lowercase .qcow2,
               .img, .raw, .raw.xz, .raw.gz, .img.xz, or .img.gz suffix; the query
-              is preserved. Import is asynchronous. An exact catalog URL match supplies
-              that image's firmware mode; unmatched URLs must be BIOS-bootable. Volume
-              fit is not verified synchronously; import can fail asynchronously. Network
-              reachability depends on the cluster importer egress policy.
+              is preserved. Import is asynchronous. Volume fit is not verified synchronously;
+              import can fail asynchronously. Network reachability depends on the
+              cluster importer egress policy.
             maxLength: 16384
         additionalProperties: false
       discriminator:
@@ -9951,6 +9975,7 @@ components:
       - reserved_default_subnet_cidr_conflict
       - default_subnet_already_exists
       - parent_vpc_failed
+      - subnet_cidr_required
       - ipv6_egress_unsupported
       - default_image_cannot_delete
       - api_key_scope_not_delegable
