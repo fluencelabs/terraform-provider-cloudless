@@ -2,47 +2,46 @@ package provider
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TestBootDiskToAPI_InlineCarriesClusterID guards a regression where the
-// inline-create boot disk was sent without clusterId. The real Fluence API's
-// VmBootDisk oneOf create variant is a CreateUserStorageRequest, which requires
-// clusterId; omitting it produced a 400 "data did not match any variant of
-// untagged enum VmBootDisk" at apply time. The mock server accepted the
-// malformed body, so the gap was only visible against the real API.
-func TestBootDiskToAPI_InlineCarriesClusterID(t *testing.T) {
-	const clusterID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	d := &vmBootDiskModel{
-		StorageID:   types.StringNull(),
-		Name:        types.StringValue("boot"),
-		StorageType: types.StringValue("NVME"),
-		VolumeGb:    types.Int64Value(40),
-		Replicated:  types.BoolValue(false),
-		OSImage:     types.StringValue("https://example.com/img.qcow2"),
+// TestBootDiskToAPI_WireShapes pins the two variants of the draft boot disk.
+// Since 0.14.0 both carry a kind tag — "existing" with a storage id, "new"
+// with volumeGb and a tagged image source (+ name).
+func TestBootDiskToAPI_WireShapes(t *testing.T) {
+	const storageID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	const imageID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+	existing, err := bootDiskToAPI(&vmBootDiskModel{StorageID: types.StringValue(storageID)})
+	if err != nil {
+		t.Fatalf("existing: %v", err)
+	}
+	wantExisting := `{"kind":"existing","storageId":"` + storageID + `"}`
+	if got, _ := json.Marshal(existing); string(got) != wantExisting {
+		t.Errorf("existing boot disk marshaled as %s, want %s", got, wantExisting)
 	}
 
-	bd, err := bootDiskToAPI(d, clusterID)
+	inline, err := bootDiskToAPI(&vmBootDiskModel{
+		StorageID: types.StringNull(),
+		Name:      types.StringValue("boot"),
+		VolumeGb:  types.Int64Value(40),
+		ImageID:   types.StringValue(imageID),
+	})
 	if err != nil {
-		t.Fatalf("bootDiskToAPI returned error: %v", err)
+		t.Fatalf("inline: %v", err)
 	}
-	if bd.Create == nil {
-		t.Fatalf("expected an inline-create boot disk, got %+v", bd)
-	}
-	if bd.Create.ClusterID != clusterID {
-		t.Errorf("inline boot disk ClusterID = %q, want %q", bd.Create.ClusterID, clusterID)
+	got, _ := json.Marshal(inline)
+	want := `{"kind":"new","name":"boot","source":{"imageId":"` + imageID + `","type":"catalog"},"volumeGb":40}`
+	if string(got) != want {
+		t.Errorf("inline boot disk marshaled as %s, want %s", got, want)
 	}
 
-	// The clusterId must survive marshaling so it reaches the API in the
-	// oneOf create variant.
-	out, err := json.Marshal(bd)
-	if err != nil {
-		t.Fatalf("marshal boot disk: %v", err)
+	if _, rerr := bootDiskToAPI(&vmBootDiskModel{VolumeGb: types.Int64Value(40)}); rerr == nil {
+		t.Error("inline boot disk without image_id should be rejected")
 	}
-	if want := `"clusterId":"` + clusterID + `"`; !strings.Contains(string(out), want) {
-		t.Errorf("marshaled boot disk missing %s\n got: %s", want, out)
+	if _, nerr := bootDiskToAPI(nil); nerr == nil {
+		t.Error("missing boot_disk block should be rejected")
 	}
 }

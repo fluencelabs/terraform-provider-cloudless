@@ -9,6 +9,7 @@ type storageRecord struct {
 	ID, ClusterID, Name, StorageType, UserID, Status, Role string
 	VolumeGb                                               uint64
 	OSImage                                                string
+	Replicated                                             bool
 }
 
 // wireStoragesOnce is called from New() to register storage handlers
@@ -24,11 +25,8 @@ func (s *Server) wireStorages() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/storages", s.handleStorageCollection)
-	// /v1/storages/delete is an exact path; ServeMux prefers exact matches over
-	// the /v1/storages/ prefix, so register both.
-	s.mux.HandleFunc("/v1/storages/delete", s.handleStorageBulkDelete)
-	s.mux.HandleFunc("/v1/storages/", s.handleStorageItem)
+	s.mux.HandleFunc("/v3/storages", s.handleStorageCollection)
+	s.mux.HandleFunc("/v3/storages/", s.handleStorageItem)
 }
 
 func (s *Server) handleStorageCollection(w http.ResponseWriter, r *http.Request) {
@@ -47,25 +45,37 @@ func (s *Server) createStorage(w http.ResponseWriter, r *http.Request) {
 		ClusterID   string `json:"clusterId"`
 		Name        string `json:"name"`
 		StorageType string `json:"storageType"`
-		OSImage     string `json:"osImage"`
-		VolumeGb    uint32 `json:"volumeGb"`
-		Replicated  bool   `json:"replicated"`
+		Source      *struct {
+			Type    string `json:"type"`
+			ImageID string `json:"imageId"`
+			URL     string `json:"url"`
+		} `json:"source"`
+		VolumeGb   uint32 `json:"volumeGb"`
+		Replicated bool   `json:"replicated"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := newID()
 	role := "DATA"
-	if body.OSImage != "" {
+	image := ""
+	if body.Source != nil {
+		image = body.Source.ImageID
+		if body.Source.Type == "http" {
+			image = body.Source.URL
+		}
+	}
+	if image != "" {
 		role = "BOOT"
 	}
 	rec := &storageRecord{
 		ID: id, ClusterID: body.ClusterID, Name: body.Name,
 		StorageType: body.StorageType, UserID: "test-user", Status: "ready",
-		Role: role, VolumeGb: uint64(body.VolumeGb), OSImage: body.OSImage,
+		Role: role, VolumeGb: uint64(body.VolumeGb), OSImage: image,
+		Replicated: body.Replicated,
 	}
 	s.storageMap[id] = rec
-	s.writeJSON(w, http.StatusOK, storageWire(rec))
+	s.writeJSON(w, http.StatusOK, publicStorageWire(rec))
 }
 
 func (s *Server) listStorages(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +87,7 @@ func (s *Server) listStorages(w http.ResponseWriter, r *http.Request) {
 		if want != "" && id != want {
 			continue
 		}
-		items = append(items, storageWire(st))
+		items = append(items, publicStorageWire(st))
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"items": items,
@@ -91,35 +101,22 @@ func (s *Server) listStorages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleStorageBulkDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.notFound(w, r)
-		return
-	}
-	var body struct {
-		IDs []string `json:"ids"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	s.mu.Lock()
-	for _, id := range body.IDs {
-		delete(s.storageMap, id)
-	}
-	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
-}
-
 // handleStorageItem serves PATCH /v1/storages/{id}.
 func (s *Server) handleStorageItem(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		s.notFound(w, r)
-		return
-	}
 	parts := splitPath(r.URL.Path)
 	if len(parts) != resourcePathParts {
 		s.notFound(w, r)
 		return
 	}
 	id := parts[2]
+	if r.Method == http.MethodDelete {
+		s.deleteStorage(w, id)
+		return
+	}
+	if r.Method != http.MethodPatch {
+		s.notFound(w, r)
+		return
+	}
 	var body struct {
 		Name     *string `json:"name"`
 		VolumeGb *uint32 `json:"volumeGb"`
@@ -138,20 +135,42 @@ func (s *Server) handleStorageItem(w http.ResponseWriter, r *http.Request) {
 	if body.VolumeGb != nil {
 		rec.VolumeGb = uint64(*body.VolumeGb)
 	}
-	s.writeJSON(w, http.StatusOK, storageWire(rec))
+	s.writeJSON(w, http.StatusOK, publicStorageWire(rec))
 }
 
-func storageWire(rec *storageRecord) map[string]any {
-	return map[string]any{
-		"id":          rec.ID,
-		"clusterId":   rec.ClusterID,
-		"name":        rec.Name,
-		"storageType": rec.StorageType,
-		"userId":      rec.UserID,
-		"status":      rec.Status,
-		"role":        rec.Role,
-		"volumeGb":    rec.VolumeGb,
-		"attachedTo":  []string{},
-		"createdAt":   "2026-01-01T00:00:00Z",
+// publicStorageWire is PublicStorageDto — the shape /v3 answers with. It
+// stands beside storageWire while /v1 still serves the storage resource.
+func publicStorageWire(rec *storageRecord) map[string]any {
+	out := map[string]any{
+		"id":            rec.ID,
+		"clusterId":     rec.ClusterID,
+		"name":          rec.Name,
+		"storageType":   rec.StorageType,
+		"status":        rec.Status,
+		"volumeGb":      rec.VolumeGb,
+		"replicated":    rec.Replicated,
+		"attachedVmIds": []string{},
+		"createdAt":     "2026-01-01T00:00:00Z",
+		"updatedAt":     "2026-01-01T00:00:00Z",
 	}
+	if rec.OSImage != "" {
+		out["imageId"] = rec.OSImage
+		out["bootMode"] = "EFI"
+	}
+	return out
+}
+
+// deleteStorage serves DELETE /{id}: /v3 deletes one resource at a time and
+// answers with the object it removed.
+func (s *Server) deleteStorage(w http.ResponseWriter, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.storageMap[id]
+	if !ok {
+		s.writeError(w, "storage not found")
+		return
+	}
+	wire := publicStorageWire(rec)
+	delete(s.storageMap, id)
+	s.writeJSON(w, http.StatusOK, wire)
 }

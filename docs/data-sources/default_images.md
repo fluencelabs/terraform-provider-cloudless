@@ -26,11 +26,11 @@ data "cloudless_default_images" "all" {}
 
 Read-Only:
 
+- `boot_mode` (String)
 - `created_at` (String)
 - `distribution` (String)
-- `download_url` (String)
-- `icon_url` (String)
 - `id` (String)
+- `is_default` (Boolean)
 - `name` (String)
 - `slug` (String)
 - `updated_at` (String)

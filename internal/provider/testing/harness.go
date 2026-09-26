@@ -4,6 +4,7 @@ package testing
 
 import (
 	"context"
+	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -22,8 +23,18 @@ type Harness struct {
 }
 
 // New starts a fresh mock + provider. Callers must defer h.Close().
-func New() *Harness {
+//
+// Every test that uses the harness fails on a contract violation recorded by
+// the mock: without that assertion at teardown, a mock response that drifts
+// from the spec leaves the whole suite green.
+func New(t testing.TB) *Harness {
+	t.Helper()
 	srv := mock.New()
+	t.Cleanup(func() {
+		for _, v := range srv.ContractViolations() {
+			t.Errorf("mock contract violation: %s", v)
+		}
+	})
 	c := client.New(srv.URL, "test-key")
 	return &Harness{
 		Mock:   srv,

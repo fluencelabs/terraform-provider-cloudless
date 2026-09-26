@@ -22,14 +22,11 @@ type vpcResource struct {
 }
 
 type vpcModel struct {
-	ID             types.String `tfsdk:"id"`
-	ClusterID      types.String `tfsdk:"cluster_id"`
-	Name           types.String `tfsdk:"name"`
-	EnableExternal types.Bool   `tfsdk:"enable_external"`
-	Status         types.String `tfsdk:"status"`
-	SubnetsCount   types.Int64  `tfsdk:"subnets_count"`
-	UserID         types.String `tfsdk:"user_id"`
-	CreatedAt      types.String `tfsdk:"created_at"`
+	ID        types.String `tfsdk:"id"`
+	ClusterID types.String `tfsdk:"cluster_id"`
+	Name      types.String `tfsdk:"name"`
+	Status    types.String `tfsdk:"status"`
+	CreatedAt types.String `tfsdk:"created_at"`
 }
 
 func (r *vpcResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -54,15 +51,8 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Required:    true,
 				Description: "Human-readable VPC name.",
 			},
-			"enable_external": schema.BoolAttribute{
-				Optional:    true,
-				Computed:    true,
-				Description: "If true the VPC has external network connectivity.",
-			},
-			"status":        schema.StringAttribute{Computed: true},
-			"subnets_count": schema.Int64Attribute{Computed: true},
-			"user_id":       schema.StringAttribute{Computed: true},
-			"created_at":    schema.StringAttribute{Computed: true},
+			"status":     schema.StringAttribute{Computed: true},
+			"created_at": schema.StringAttribute{Computed: true},
 		},
 	}
 }
@@ -79,9 +69,8 @@ func (r *vpcResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	out, err := r.c.CreateVPC(ctx, client.CreateVPCRequest{
-		ClusterID:      plan.ClusterID.ValueString(),
-		Name:           plan.Name.ValueString(),
-		EnableExternal: nullableBool(plan.EnableExternal),
+		ClusterID: plan.ClusterID.ValueString(),
+		Name:      plan.Name.ValueString(),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Create VPC failed", err.Error())
@@ -141,10 +130,6 @@ func (r *vpcResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		updReq.Name = nullableString(plan.Name)
 		changed = true
 	}
-	if !plan.EnableExternal.Equal(state.EnableExternal) {
-		updReq.EnableExternal = nullableBool(plan.EnableExternal)
-		changed = true
-	}
 
 	var out *client.VPC
 	if changed {
@@ -195,9 +180,6 @@ func (r *vpcResource) fill(m *vpcModel, v *client.VPC) {
 	m.ID = types.StringValue(v.ID)
 	m.ClusterID = types.StringValue(v.ClusterID)
 	m.Name = types.StringValue(v.Name)
-	m.EnableExternal = boolFromPtr(v.EnableExternal)
 	m.Status = types.StringValue(v.Status)
-	m.SubnetsCount = types.Int64Value(int64(v.SubnetsCount))
-	m.UserID = types.StringValue(v.UserID)
 	m.CreatedAt = types.StringValue(v.CreatedAt)
 }

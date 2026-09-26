@@ -11,8 +11,9 @@ import (
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
 )
 
-// publicAPISpec is a vendored snapshot of vodopad's docs/fluence-public.yaml
-// (the api.fluence.dev OpenAPI 3.1 spec). Refresh with `make openapi-refresh`.
+// publicAPISpec is a vendored snapshot of the public OpenAPI 3.1 spec that a
+// running vodopad serves at /docs/fluence-public.yaml (stage by default).
+// Refresh with `make openapi-refresh`.
 //
 //go:embed testdata/fluence-public.yaml
 var publicAPISpec []byte

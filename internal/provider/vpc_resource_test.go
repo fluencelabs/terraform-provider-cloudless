@@ -9,7 +9,7 @@ import (
 )
 
 func TestUnitVPC_CreateUpdateRename(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{

@@ -3,13 +3,16 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -28,10 +31,9 @@ type vmResource struct {
 }
 
 // vmModel: data_disk_ids is the user-controlled attach list, refreshed on
-// Read. Boot disk is its own block (either an existing storage_id or inline
-// create fields). The inline public_ip block is gone — public IP attachment
-// lives in cloudless_vm_public_ip_attachment (Task 8). public_ip_id is
-// retained as a Computed mirror so users can read whatever the API reports.
+// Read. boot_disk is its own block; network_interface blocks describe the
+// VM's interfaces (see vm_network.go). subnet_ids, network_interface_ids and
+// public_ip_id are computed mirrors of what the API reports.
 type vmModel struct {
 	ID              types.String `tfsdk:"id"`
 	ClusterID       types.String `tfsdk:"cluster_id"`
@@ -39,11 +41,11 @@ type vmModel struct {
 	ConfigurationID types.String `tfsdk:"configuration_id"`
 
 	BootDisk    *vmBootDiskModel `tfsdk:"boot_disk"`
+	NICs        []vmNICModel     `tfsdk:"network_interface"`
 	DataDiskIDs types.List       `tfsdk:"data_disk_ids"`
 	SSHKeyIDs   types.List       `tfsdk:"ssh_key_ids"`
 
 	Status            types.String `tfsdk:"status"`
-	UserID            types.String `tfsdk:"user_id"`
 	BootDiskID        types.String `tfsdk:"boot_disk_id"`
 	Subnets           types.List   `tfsdk:"subnet_ids"`
 	NetworkInterfaces types.List   `tfsdk:"network_interface_ids"`
@@ -54,16 +56,14 @@ type vmModel struct {
 }
 
 // vmBootDiskModel mirrors the boot_disk block: either reference an existing
-// storage by storage_id, OR supply name + storage_type + volume_gb +
-// replicated (+ os_image) to create one inline. The block is ForceNew on any
-// change because the API does not support changing the boot disk in place.
+// storage by storage_id, OR supply volume_gb + image_id (+ name) to have the
+// draft create one from the image catalog. The block is ForceNew on any
+// change because a boot disk is frozen once the VM is provisioned.
 type vmBootDiskModel struct {
-	StorageID   types.String `tfsdk:"storage_id"`
-	Name        types.String `tfsdk:"name"`
-	StorageType types.String `tfsdk:"storage_type"`
-	VolumeGb    types.Int64  `tfsdk:"volume_gb"`
-	Replicated  types.Bool   `tfsdk:"replicated"`
-	OSImage     types.String `tfsdk:"os_image"`
+	StorageID types.String `tfsdk:"storage_id"`
+	Name      types.String `tfsdk:"name"`
+	VolumeGb  types.Int64  `tfsdk:"volume_gb"`
+	ImageID   types.String `tfsdk:"image_id"`
 }
 
 func (r *vmResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -110,7 +110,6 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 				Validators: []validator.List{listvalidator.ValueStringsAre(validators.UUID())},
 			},
 			"status":       schema.StringAttribute{Computed: true},
-			"user_id":      schema.StringAttribute{Computed: true},
 			"boot_disk_id": schema.StringAttribute{Computed: true},
 			"subnet_ids": schema.ListAttribute{
 				ElementType:   types.StringType,
@@ -124,7 +123,7 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 			},
 			"public_ip_id": schema.StringAttribute{
 				Computed:      true,
-				Description:   "ID of the attached public IP, if any. Manage attachment via cloudless_vm_public_ip_attachment.",
+				Description:   "ID of the public IP attached to the VM, if any (mirror of the public network_interface block).",
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"restart_required": schema.BoolAttribute{Computed: true},
@@ -132,36 +131,31 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 			"updated_at":       schema.StringAttribute{Computed: true},
 		},
 		Blocks: map[string]schema.Block{
+			"network_interface": networkInterfaceBlock(),
 			"boot_disk": schema.SingleNestedBlock{
-				Description: "Boot disk: either reference an existing storage_id or supply name + storage_type + volume_gb + replicated + os_image to create one inline. The boot disk cannot be changed in place; any modification forces a new VM.",
+				Description: "Boot disk: either reference an existing storage_id, or supply volume_gb + image_id (+ name) to create one from the image catalog while the VM is a draft. The boot disk cannot be changed in place; any modification forces a new VM.",
 				Attributes: map[string]schema.Attribute{
 					"storage_id": schema.StringAttribute{
 						Optional:      true,
-						Description:   "Existing storage ID to attach. Mutually exclusive with the inline create fields.",
+						Description:   "Existing storage ID to use as the boot disk. Mutually exclusive with the inline create fields.",
 						PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 						Validators:    []validator.String{validators.UUID()},
 					},
 					"name": schema.StringAttribute{
 						Optional:      true,
-						PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
-					},
-					"storage_type": schema.StringAttribute{
-						Optional:      true,
-						Validators:    []validator.String{stringvalidator.OneOf("NVME")},
+						Description:   "Name of the inline-created boot disk. Defaults to a server-chosen name.",
 						PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 					},
 					"volume_gb": schema.Int64Attribute{
 						Optional:      true,
+						Description:   "Size of the inline-created boot disk in GB.",
 						PlanModifiers: []planmodifier.Int64{int64planmodifier.RequiresReplace()},
 					},
-					"replicated": schema.BoolAttribute{
+					"image_id": schema.StringAttribute{
 						Optional:      true,
-						PlanModifiers: []planmodifier.Bool{boolplanmodifier.RequiresReplace()},
-					},
-					"os_image": schema.StringAttribute{
-						Optional:      true,
-						Description:   "URL of an OS image (only valid for inline-create boot disk).",
+						Description:   "Catalog image id for the inline-created boot disk (a 32-hex id, not a UUID). See the cloudless_default_images data source.",
 						PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+						Validators:    []validator.String{stringvalidator.LengthAtLeast(1)},
 					},
 				},
 			},
@@ -173,32 +167,30 @@ func (r *vmResource) Configure(_ context.Context, req resource.ConfigureRequest,
 	r.c = clientFromProviderData(req.ProviderData, &resp.Diagnostics)
 }
 
-// bootDiskToAPI translates the Terraform boot_disk block into a VMBootDisk for
-// the Fluence API: existing storage_id wins; otherwise the inline-create
-// fields are required as a set. The inline-create variant is a
-// CreateUserStorageRequest, which carries its own clusterId — it inherits the
-// VM's cluster, passed in here.
-func bootDiskToAPI(d *vmBootDiskModel, clusterID string) (client.VMBootDisk, error) {
+// discardTimeout bounds the best-effort draft discard after a failed create.
+const discardTimeout = 30 * time.Second
+
+// bootDiskToAPI translates the Terraform boot_disk block into the /v3
+// boot-disk body: an existing storage ID, or an inline create from a catalog
+// image.
+func bootDiskToAPI(d *vmBootDiskModel) (client.DraftBootDisk, error) {
 	if d == nil {
-		return client.VMBootDisk{}, errors.New("boot_disk block is required")
+		return client.DraftBootDisk{}, errors.New("boot_disk block is required")
 	}
-	if !d.StorageID.IsNull() && !d.StorageID.IsUnknown() && d.StorageID.ValueString() != "" {
-		s := d.StorageID.ValueString()
-		return client.VMBootDisk{StorageID: &s}, nil
+	if knownString(d.StorageID) {
+		return client.DraftBootDisk{StorageID: d.StorageID.ValueString()}, nil
 	}
-	if d.Name.IsNull() || d.StorageType.IsNull() || d.VolumeGb.IsNull() || d.Replicated.IsNull() {
-		return client.VMBootDisk{}, errors.New(
-			"inline boot_disk requires name, storage_type, volume_gb, and replicated",
-		)
+	if d.VolumeGb.IsNull() || d.ImageID.IsNull() {
+		return client.DraftBootDisk{}, errors.New("inline boot_disk requires volume_gb and image_id")
 	}
-	return client.VMBootDisk{Create: &client.CreateUserStorageInline{
-		ClusterID:   clusterID,
-		Name:        d.Name.ValueString(),
-		StorageType: d.StorageType.ValueString(),
-		VolumeGb:    uint32(d.VolumeGb.ValueInt64()),
-		Replicated:  d.Replicated.ValueBool(),
-		OSImage:     d.OSImage.ValueString(),
-	}}, nil
+	disk := client.DraftBootDisk{
+		VolumeGb: uint32(d.VolumeGb.ValueInt64()),
+		Source:   client.CatalogImage(d.ImageID.ValueString()),
+	}
+	if knownString(d.Name) {
+		disk.Name = d.Name.ValueString()
+	}
+	return disk, nil
 }
 
 // (stringsFromList and listFromStrings live in util.go for use by other resources.)
@@ -210,41 +202,165 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		return
 	}
 
-	bd, err := bootDiskToAPI(plan.BootDisk, plan.ClusterID.ValueString())
+	bd, err := bootDiskToAPI(plan.BootDisk)
 	if err != nil {
 		resp.Diagnostics.AddAttributeError(path.Root("boot_disk"), "Invalid boot_disk", err.Error())
 		return
 	}
+	if _, verr := validateNICLayout(plan.NICs, false); verr != nil {
+		resp.Diagnostics.Append(nicDiagnostic(verr))
+		return
+	}
 
-	dataDisks := stringsFromList(plan.DataDiskIDs)
-	sshKeys := stringsFromList(plan.SSHKeyIDs)
+	// Nothing declared, nothing managed: only a configuration with blocks
+	// gets blocks in state; surfacing interfaces is import-time behaviour.
+	noBlocks := len(plan.NICs) == 0
+	keepBlocks := func() {
+		if noBlocks {
+			plan.NICs = nil
+		}
+	}
 
-	out, err := r.c.CreateVM(ctx, client.CreateVMRequest{
-		ClusterID:       plan.ClusterID.ValueString(),
-		Name:            plan.Name.ValueString(),
-		ConfigurationID: plan.ConfigurationID.ValueString(),
-		BootDisk:        bd,
-		DataDisks:       dataDisks,
-		SSHKeys:         sshKeys,
-	})
+	id, ownedIPs, err := r.createDraft(ctx, &plan, bd)
 	if err != nil {
 		resp.Diagnostics.AddError("Create VM failed", err.Error())
 		return
 	}
 
-	id := out.ID
-	out, err = pollUntilReady(ctx,
+	out, err := pollUntilReady(ctx,
 		func(ctx context.Context) (*client.VM, error) { return r.c.GetVM(ctx, id) },
 		func(v *client.VM) string { return v.Status },
 		"vm "+id,
 	)
 	if err != nil {
 		resp.Diagnostics.AddError("Waiting for VM failed", err.Error())
+		// Provision was accepted, so the VM exists and bills: record whatever
+		// the API reports so destroy can clean it up instead of orphaning it.
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
+		defer cancel()
+		if out == nil {
+			out, _ = r.c.GetVM(sctx, id)
+		}
+		if out != nil {
+			resp.Diagnostics.Append(r.fillWithNICs(sctx, &plan, out)...)
+			keepBlocks()
+		} else {
+			// Even the re-read failed: keep the id and the plan's known values
+			// so destroy can still reach the VM.
+			r.fillMinimal(&plan, id, ownedIPs)
+		}
+		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
 	}
 
-	r.fill(&plan, out)
+	// Existing public IPs attach to the live VM only (the API forbids it on a
+	// draft); this is the one step of Create that may restart the VM.
+	if aerr := attachExistingPublicNICs(ctx, r.c, id, plan.NICs); aerr != nil {
+		resp.Diagnostics.AddError("Attach public IPs failed", aerr.Error())
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
+		defer cancel()
+		// Re-read so the VM-level mirrors and the blocks describe the same
+		// moment (the attach may have partly succeeded).
+		if fresh, gerr := r.c.GetVM(sctx, id); gerr == nil {
+			out = fresh
+		}
+		resp.Diagnostics.Append(r.fillWithNICs(sctx, &plan, out)...)
+		keepBlocks()
+		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+		return
+	}
+	if out, err = r.c.GetVM(ctx, id); err != nil {
+		resp.Diagnostics.AddError("Read VM after create failed", err.Error())
+		return
+	}
+
+	resp.Diagnostics.Append(r.fillWithNICs(ctx, &plan, out)...)
+	keepBlocks()
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// createDraft runs the /v3 draft flow: create a draft with server defaults,
+// refine each aspect the plan sets, then provision. A draft is free and
+// unallocated, so on any failure before provision it is discarded rather than
+// left for the user to find. Returns the VM ID once provision was accepted
+// (graph @cloudless/fluence, node #1790).
+func (r *vmResource) createDraft(
+	ctx context.Context,
+	plan *vmModel,
+	bd client.DraftBootDisk,
+) (string, []string, error) {
+	nics, err := draftInterfaces(plan.NICs)
+	if err != nil {
+		return "", nil, err
+	}
+	req := client.VMDraftRequest{
+		ClusterID:       plan.ClusterID.ValueString(),
+		ConfigurationID: plan.ConfigurationID.ValueString(),
+		Name:            plan.Name.ValueString(),
+		BootDisk:        &bd,
+		Interfaces:      nics,
+	}
+	// The server seeds a draft with all of the user's SSH keys; only override
+	// when the plan names a set, so an omitted ssh_key_ids keeps that default.
+	if !plan.SSHKeyIDs.IsNull() {
+		req.SSHKeyIDs = stringsFromList(plan.SSHKeyIDs)
+	}
+	for _, storageID := range stringsFromList(plan.DataDiskIDs) {
+		req.DataDisks = append(req.DataDisks, client.DraftDataDisk{StorageID: storageID})
+	}
+
+	draft, err := r.c.CreateVMDraft(ctx, req)
+	if err != nil {
+		return "", nil, fmt.Errorf("create draft: %w", err)
+	}
+	id := draft.ID
+	// Public IPs the draft created for itself, named by the receipt; released
+	// on discard because the draft delete's cascade is unobserved
+	// (graph @cloudless/fluence, node #1814) and a leaked address bills.
+	ownedIPs := draft.CreatedResources.PublicIPIDs
+
+	if len(nics) == 0 && len(plan.NICs) > 0 {
+		// The create body could not carry the blocks (see draftInterfaces);
+		// the draft holds the server's automatic interface, add the rest.
+		added, aerr := addDraftNICs(ctx, r.c, id, plan.NICs)
+		ownedIPs = append(ownedIPs, added...)
+		if aerr != nil {
+			return "", nil, r.discardDraft(ctx, id, ownedIPs, "assemble network interfaces", aerr)
+		}
+	}
+
+	if _, perr := r.c.ProvisionVM(ctx, id); perr != nil && !r.provisionLanded(ctx, id, perr) {
+		return "", nil, r.discardDraft(ctx, id, ownedIPs, "provision", perr)
+	}
+	return id, ownedIPs, nil
+}
+
+// discardDraft deletes a draft that failed mid-assembly, plus the public IPs
+// it created, and wraps the step's error. The failure may be the caller's
+// context dying, so the discard runs on a fresh deadline.
+func (r *vmResource) discardDraft(ctx context.Context, id string, ownedIPs []string, step string, err error) error {
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
+	defer cancel()
+	if derr := r.c.DeleteVMDraft(dctx, id); derr != nil && !client.IsNotFound(derr) {
+		return fmt.Errorf("%s: %w (and discarding draft %s failed: %w)", step, err, id, derr)
+	}
+	for _, ipID := range ownedIPs {
+		if ierr := r.c.DeletePublicIP(dctx, ipID); ierr != nil && !client.IsNotFound(ierr) {
+			return fmt.Errorf("%s: %w (and releasing draft-created public IP %s failed: %w)", step, err, ipID, ierr)
+		}
+	}
+	return fmt.Errorf("%s: %w", step, err)
+}
+
+// provisionLanded reports whether a provision call that failed in transit
+// was nevertheless accepted: a provisioned VM is no longer a draft, cannot
+// be discarded, and bills — so the caller must keep its id and poll it.
+func (r *vmResource) provisionLanded(ctx context.Context, id string, perr error) bool {
+	if !isTransient(perr) {
+		return false
+	}
+	vm, gerr := r.c.GetVM(context.WithoutCancel(ctx), id)
+	return gerr == nil && vm.Status != statusDraft
 }
 
 func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -268,7 +384,7 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 		return
 	}
 
-	r.fill(&state, out)
+	resp.Diagnostics.Append(r.fillWithNICs(ctx, &state, out)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -279,41 +395,23 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 	if resp.Diagnostics.HasError() {
 		return
 	}
-
 	id := state.ID.ValueString()
 
-	if !plan.Name.Equal(state.Name) {
-		v := plan.Name.ValueString()
-		if _, err := r.c.UpdateVM(ctx, id, client.UpdateVMRequest{Name: &v}); err != nil {
-			resp.Diagnostics.AddError("Update VM failed", err.Error())
-			return
-		}
+	// Each step returns an error to report; a partial failure still refreshes
+	// state so the next plan sees what really happened.
+	steps := []struct {
+		what string
+		run  func() error
+	}{
+		{"Update VM", func() error { return r.updateName(ctx, id, state, plan) }},
+		{"Attach VM storages", func() error { return r.attachDataDisks(ctx, id, state, plan) }},
+		{"Detach VM storages", func() error { return r.detachDataDisks(ctx, id, state, plan) }},
+		{"Update VM network interfaces", func() error { return r.updateNICs(ctx, id, state, plan) }},
 	}
-
-	// data_disk_ids smart Update: diff old vs new and call /storages/add and
-	// /storages/remove. The API does not accept a "set" operation.
-	toAdd, toRemove := diffStrings(stringsFromList(state.DataDiskIDs), stringsFromList(plan.DataDiskIDs))
-	refreshAndSet := func() {
-		got, err := r.c.GetVM(ctx, id)
-		if err != nil {
-			resp.Diagnostics.AddError("Read VM after partial update failed", err.Error())
-			return
-		}
-		r.fill(&plan, got)
-		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
-	}
-
-	if len(toAdd) > 0 {
-		if err := r.c.AddVMStorages(ctx, id, toAdd); err != nil {
-			resp.Diagnostics.AddError("Attach VM storages failed", err.Error())
-			refreshAndSet()
-			return
-		}
-	}
-	if len(toRemove) > 0 {
-		if err := r.c.RemoveVMStorages(ctx, id, toRemove); err != nil {
-			resp.Diagnostics.AddError("Detach VM storages failed", err.Error())
-			refreshAndSet()
+	for _, st := range steps {
+		if err := st.run(); err != nil {
+			resp.Diagnostics.AddError(st.what+" failed", err.Error())
+			r.refreshInto(ctx, id, &plan, resp)
 			return
 		}
 	}
@@ -323,8 +421,66 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		resp.Diagnostics.AddError("Read VM after update failed", err.Error())
 		return
 	}
-	r.fill(&plan, got)
+	resp.Diagnostics.Append(r.fillWithNICs(ctx, &plan, got)...)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
+}
+
+// refreshInto records the VM's current state after a partial update.
+func (r *vmResource) refreshInto(ctx context.Context, id string, plan *vmModel, resp *resource.UpdateResponse) {
+	got, err := r.c.GetVM(ctx, id)
+	if err != nil {
+		resp.Diagnostics.AddError("Read VM after partial update failed", err.Error())
+		return
+	}
+	resp.Diagnostics.Append(r.fillWithNICs(ctx, plan, got)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+}
+
+func (r *vmResource) updateName(ctx context.Context, id string, state, plan vmModel) error {
+	if plan.Name.Equal(state.Name) {
+		return nil
+	}
+	v := plan.Name.ValueString()
+	_, err := r.c.UpdateVM(ctx, id, client.UpdateVMRequest{Name: &v})
+	return err
+}
+
+// attachDataDisks and detachDataDisks diff data_disk_ids and call
+// /storages/add and /storages/remove; the API has no "set" operation.
+func (r *vmResource) attachDataDisks(ctx context.Context, id string, state, plan vmModel) error {
+	toAdd, _ := diffStrings(stringsFromList(state.DataDiskIDs), stringsFromList(plan.DataDiskIDs))
+	if len(toAdd) == 0 {
+		return nil
+	}
+	return r.c.AddVMStorages(ctx, id, toAdd)
+}
+
+func (r *vmResource) detachDataDisks(ctx context.Context, id string, state, plan vmModel) error {
+	_, toRemove := diffStrings(stringsFromList(state.DataDiskIDs), stringsFromList(plan.DataDiskIDs))
+	if len(toRemove) == 0 {
+		return nil
+	}
+	return r.c.RemoveVMStorages(ctx, id, toRemove)
+}
+
+// updateNICs reconciles network_interface blocks on the live VM and applies
+// the restart the API asks for afterwards, so the configuration is in effect
+// when apply returns.
+func (r *vmResource) updateNICs(ctx context.Context, id string, state, plan vmModel) error {
+	if len(plan.NICs) == 0 && len(state.NICs) == 0 {
+		return nil
+	}
+	if _, err := validateNICLayout(plan.NICs, false); err != nil {
+		return err
+	}
+	changed, err := reconcileLiveNICs(ctx, r.c, id, state.NICs, plan.NICs)
+	if err != nil || !changed {
+		return err
+	}
+	if rerr := restartIfFlagged(ctx, r.c, id); rerr != nil {
+		return fmt.Errorf("restart: %w", rerr)
+	}
+	return nil
 }
 
 func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -335,6 +491,18 @@ func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, res
 	}
 
 	id := state.ID.ValueString()
+	// A draft that never reached provision holds no cluster resources and is
+	// discarded through /v3; a live VM is terminated through /v2.
+	if state.Status.ValueString() == statusDraft {
+		if err := r.c.DeleteVMDraft(ctx, id); err != nil && !client.IsNotFound(err) {
+			resp.Diagnostics.AddError("Discard VM draft failed", err.Error())
+		}
+		// The draft discard is documented to cascade draft-created IPs, but
+		// that is unobserved (graph @cloudless/fluence, node #1814); release
+		// them the same way the live path does, tolerating "already gone".
+		r.releaseOwnedIPs(ctx, state.NICs, &resp.Diagnostics)
+		return
+	}
 	if err := r.c.TerminateVM(ctx, id); err != nil && !client.IsNotFound(err) {
 		resp.Diagnostics.AddError("Terminate VM failed", err.Error())
 		return
@@ -356,10 +524,148 @@ func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, res
 	if bd := state.BootDisk; bd != nil &&
 		(bd.StorageID.IsNull() || bd.StorageID.ValueString() == "") &&
 		!state.BootDiskID.IsNull() && state.BootDiskID.ValueString() != "" {
-		if err := r.c.DeleteStorage(ctx, state.BootDiskID.ValueString()); err != nil && !client.IsNotFound(err) {
+		bootID := state.BootDiskID.ValueString()
+		err := retryTransient(ctx, func(ctx context.Context) error { return r.c.DeleteStorage(ctx, bootID) })
+		if err != nil && !client.IsNotFound(err) {
 			resp.Diagnostics.AddError("Deleting boot disk failed", err.Error())
 		}
 	}
+
+	r.releaseOwnedIPs(ctx, state.NICs, &resp.Diagnostics)
+}
+
+// releaseOwnedIPs deletes the public IPs the VM created for itself: they
+// have no resource of their own, and terminate does not cascade them
+// (observed on stage; graph @cloudless/fluence, node #1814).
+func (r *vmResource) releaseOwnedIPs(ctx context.Context, nics []vmNICModel, diags *diag.Diagnostics) {
+	for _, ipID := range ownedPublicIPs(nics) {
+		err := retryTransient(ctx, func(ctx context.Context) error { return r.c.DeletePublicIP(ctx, ipID) })
+		if err != nil && !client.IsNotFound(err) {
+			diags.AddError("Releasing VM-owned public IP "+ipID+" failed", err.Error())
+		}
+	}
+}
+
+// ModifyPlan validates network_interface blocks at plan time and marks the
+// changes a live VM cannot absorb as replacements.
+func (r *vmResource) ModifyPlan(
+	ctx context.Context,
+	req resource.ModifyPlanRequest,
+	resp *resource.ModifyPlanResponse,
+) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	var plan, cfg vmModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	// Ownership of a public IP is a configuration fact; stamp it into the plan
+	// so Create/Update and the replacement rules can read it.
+	plan.NICs = resolveNICOwnership(cfg.NICs, plan.NICs)
+	for i := range plan.NICs {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx,
+			path.Root("network_interface").AtListIndex(i).AtName("address_type"), plan.NICs[i].AddressType)...)
+	}
+	// Layout rules are about what the user wrote; `default` carried from
+	// state is the API's word and is not re-judged here.
+	if _, err := validateNICs(cfg.NICs); err != nil {
+		resp.Diagnostics.Append(nicDiagnostic(err))
+		return
+	}
+	if req.State.Raw.IsNull() {
+		return
+	}
+	var state vmModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if why := newNICsWithStaticIPs(state.NICs, plan.NICs); why != "" {
+		resp.Diagnostics.AddAttributeError(path.Root("network_interface"), "Unsupported network_interface change",
+			why+": the API sets static IPs only while the VM is a draft; create the VM with them or drop static_ips.")
+		return
+	}
+	if replace, why := planNICReplacement(state.NICs, plan.NICs); replace {
+		resp.Diagnostics.AddAttributeWarning(path.Root("network_interface"),
+			"VM will be replaced", why+"; a live VM cannot change this in place.")
+		resp.RequiresReplace = append(resp.RequiresReplace, path.Root("network_interface"))
+		return
+	}
+	if nicKeysDiffer(state.NICs, plan.NICs) {
+		// The VM-level mirrors change with the interfaces; UseStateForUnknown
+		// would otherwise carry stale values into the plan.
+		for _, name := range []string{"network_interface_ids", "subnet_ids"} {
+			resp.Diagnostics.Append(
+				resp.Plan.SetAttribute(ctx, path.Root(name), types.ListUnknown(types.StringType))...)
+		}
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("public_ip_id"), types.StringUnknown())...)
+	}
+}
+
+// fillMinimal records a VM whose state could not be read after provision:
+// the id (so destroy can terminate it) with every computed field known but
+// empty. The next refresh replaces it with what the API reports.
+func (r *vmResource) fillMinimal(m *vmModel, id string, ownedIPs []string) {
+	m.ID = types.StringValue(id)
+	m.Status = types.StringValue("unknown")
+	m.BootDiskID = types.StringNull()
+	m.DataDiskIDs = listFromStrings(nil)
+	m.Subnets = listFromStrings(nil)
+	m.NetworkInterfaces = listFromStrings(nil)
+	m.PublicIPID = types.StringNull()
+	m.RestartRequired = types.BoolValue(false)
+	m.CreatedAt = types.StringValue("")
+	m.UpdatedAt = types.StringValue("")
+	// Keep the public IPs the draft created so destroy releases them: the
+	// blocks carry only what makes ownership visible to releaseOwnedIPs.
+	m.NICs = nil
+	for _, ipID := range ownedIPs {
+		m.NICs = append(m.NICs, vmNICModel{
+			ID:              types.StringNull(),
+			Type:            types.StringValue(nicTypePublic),
+			SubnetID:        types.StringNull(),
+			PublicIPID:      types.StringValue(ipID),
+			AddressType:     types.StringValue(defaultPublicIPAddressType),
+			SecurityGroupID: types.StringNull(),
+			StaticIPs:       types.ListNull(types.StringType),
+			Default:         types.BoolValue(false),
+			AssignedIPs:     listFromStrings(nil),
+		})
+	}
+}
+
+// fillWithNICs fills the model from the VM and its interfaces.
+func (r *vmResource) fillWithNICs(ctx context.Context, m *vmModel, v *client.VM) diag.Diagnostics {
+	var diags diag.Diagnostics
+	imported := m.Status.ValueString() == statusImported // fill overwrites status
+	r.fill(m, v)
+	ifaces, err := r.c.ListVMInterfaces(ctx, v.ID)
+	if err != nil {
+		diags.AddError("Read VM network interfaces failed", err.Error())
+		return diags
+	}
+	if imported {
+		m.NICs = importNICs(ifaces)
+	} else {
+		m.NICs = nicsFromAPI(m.NICs, ifaces)
+	}
+	// Since 0.14.0 the VM view names its interfaces and nothing more: the
+	// subnets it sits on and the address it answers at are read off them.
+	var subnets []string
+	m.PublicIPID = types.StringNull()
+	for _, f := range ifaces {
+		if sub := f.SubnetID(); sub != "" {
+			subnets = append(subnets, sub)
+		}
+		if ip := f.PublicIPID(); ip != "" {
+			m.PublicIPID = types.StringValue(ip)
+		}
+	}
+	m.Subnets = listFromStrings(sortedCopy(subnets))
+	return diags
 }
 
 func (r *vmResource) ImportState(
@@ -368,6 +674,9 @@ func (r *vmResource) ImportState(
 	resp *resource.ImportStateResponse,
 ) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	// Mark the import so the first Read renders every interface as a block;
+	// a configuration without blocks otherwise keeps none.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("status"), types.StringValue(statusImported))...)
 }
 
 // fill copies API data into the model. Computed list fields use types.List
@@ -378,12 +687,11 @@ func (r *vmResource) fill(m *vmModel, v *client.VM) {
 	m.ConfigurationID = types.StringValue(v.ConfigurationID)
 	m.Name = types.StringValue(v.Name)
 	m.Status = types.StringValue(v.Status)
-	m.UserID = types.StringValue(v.UserID)
 	m.BootDiskID = stringFromPtr(v.BootDisk)
 	m.DataDiskIDs = listFromStrings(v.DataDisks)
-	m.Subnets = listFromStrings(v.Subnets)
-	m.NetworkInterfaces = listFromStrings(v.NetworkInterfaces)
-	m.PublicIPID = stringFromPtr(v.PublicIP)
+	// The API lists these in arbitrary order (it changes across a restart);
+	// sort so the computed mirrors are stable between plan and apply.
+	m.NetworkInterfaces = listFromStrings(sortedCopy(v.Interfaces))
 	m.RestartRequired = types.BoolValue(v.RestartRequired)
 	m.CreatedAt = types.StringValue(v.CreatedAt)
 	m.UpdatedAt = types.StringValue(v.UpdatedAt)

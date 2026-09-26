@@ -10,6 +10,16 @@ import (
 
 const probeClusterID = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
 
+func getJSON(t *testing.T, url string) int {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+
 func postJSON(t *testing.T, url, body string) int {
 	t.Helper()
 	resp, err := http.Post(url, "application/json", strings.NewReader(body))
@@ -26,7 +36,7 @@ func postJSON(t *testing.T, url, body string) int {
 func TestContractMiddleware_RejectsObjectFormSGCreate(t *testing.T) {
 	s := mock.New()
 	defer s.Close()
-	code := postJSON(t, s.URL+"/v1/security_groups", `{
+	code := postJSON(t, s.URL+"/v3/security-groups", `{
 		"clusterId": "`+probeClusterID+`",
 		"name": "x",
 		"ingressRules": {"type": "allow", "rules": []},
@@ -42,9 +52,9 @@ func TestContractMiddleware_AcceptsArraySGCreate(t *testing.T) {
 	defer s.Close()
 	rule := `{"type":"ipv4","protocolKind":{"tcp":{"ports":{"exact":{"value":22}}}},` +
 		`"remote":{"address":"0.0.0.0/0"}}`
-	body := `{"clusterId":"` + probeClusterID + `","name":"x",` +
-		`"ingressRules":[` + rule + `],"egressRules":null}`
-	if code := postJSON(t, s.URL+"/v1/security_groups", body); code == http.StatusBadRequest {
+	body := `{"vpcId":"` + probeClusterID + `","name":"x",` +
+		`"ingressRules":[` + rule + `]}`
+	if code := postJSON(t, s.URL+"/v3/security-groups", body); code == http.StatusBadRequest {
 		t.Fatalf("array-form SG create should pass the contract, got 400")
 	}
 }
@@ -62,17 +72,32 @@ func TestContractMiddleware_MockResponsesConform(t *testing.T) {
 	posts := []struct {
 		path, body string
 	}{
-		{"/v1/ssh_keys", `{"name":"k","publicKey":"ssh-ed25519 AAAA u@e"}`},
-		{"/v1/vpcs", `{"clusterId":"` + cid + `","name":"vpc"}`},
-		{"/v1/storages", `{"clusterId":"` + cid + `","name":"vol",` +
+		{"/v3/ssh-keys", `{"name":"k","publicKey":"ssh-ed25519 AAAA u@e"}`},
+		{"/v3/vpcs", `{"clusterId":"` + cid + `","name":"vpc"}`},
+		{"/v3/storages", `{"clusterId":"` + cid + `","name":"vol",` +
 			`"storageType":"NVME","volumeGb":40,"replicated":true}`},
-		{"/v1/public_ips", `{"clusterId":"` + cid + `","name":"ip","addressType":"V4"}`},
-		{"/v1/security_groups", `{"clusterId":"` + cid + `","name":"sg",` +
-			`"ingressRules":` + sgRule + `,"egressRules":null}`},
+		{"/v3/public-ips", `{"clusterId":"` + cid + `","name":"ip","addressType":"V4"}`},
+		{"/v3/security-groups", `{"vpcId":"` + cid + `","name":"sg",` +
+			`"ingressRules":` + sgRule + `}`},
 	}
 	for _, p := range posts {
 		if code := postJSON(t, s.URL+p.path, p.body); code >= 500 {
 			t.Fatalf("POST %s returned %d", p.path, code)
+		}
+	}
+
+	// Catalog reads: their envelope changed once (bare array -> {items}) and
+	// only a live run caught it; keep them under the contract too.
+	s.SeedDatacenter("dcdcdcdc-dcdc-4dcd-8dcd-dcdcdcdcdcdc", "DE", "FRA", "DE-FRA-1")
+	s.SeedCluster(cid, "probe", "dcdcdcdc-dcdc-4dcd-8dcd-dcdcdcdcdcdc")
+	// A public IP held by a VM carries a UserVmReference; make one before
+	// listing so the attached shape is under the contract too.
+	if code := postJSON(t, s.URL+"/v3/vms", ""); code >= 500 {
+		t.Fatalf("POST /v3/vms returned %d", code)
+	}
+	for _, path := range []string{"/v3/clusters", "/v3/datacenters", "/v3/vpcs", "/v3/storages", "/v3/public-ips", "/v3/security-groups", "/v3/ssh-keys"} {
+		if code := getJSON(t, s.URL+path); code >= 500 {
+			t.Fatalf("GET %s returned %d", path, code)
 		}
 	}
 

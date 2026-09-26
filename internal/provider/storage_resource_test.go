@@ -9,7 +9,7 @@ import (
 )
 
 func TestUnitStorage_CreateAndResize(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -28,7 +28,6 @@ resource "cloudless_storage" "data" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("cloudless_storage.data", "volume_gb", "100"),
 					resource.TestCheckResourceAttr("cloudless_storage.data", "status", "ready"),
-					resource.TestCheckResourceAttr("cloudless_storage.data", "role", "DATA"),
 				),
 			},
 			{

@@ -39,7 +39,7 @@ func requireSameID(addr string, want *string) resource.TestCheckFunc {
 }
 
 func TestUnitVM_CreateMinimal(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -53,7 +53,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_vm" "app" {
@@ -76,7 +76,7 @@ resource "cloudless_vm" "app" {
 }
 
 func TestUnitVM_DataDiskIDsSmartUpdate(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	var initialVMID string
@@ -92,7 +92,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_storage" "data1" {
@@ -124,7 +124,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_storage" "data1" {
@@ -164,7 +164,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_storage" "data2" {
@@ -201,7 +201,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_storage" "data1" {
@@ -241,7 +241,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_storage" "data1" {
@@ -271,7 +271,7 @@ resource "cloudless_vm" "app" {
 }
 
 func TestUnitVM_PartialUpdateRefreshesState(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{

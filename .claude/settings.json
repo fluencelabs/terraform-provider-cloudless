@@ -1,0 +1,50 @@
+{
+  "enabledPlugins": {
+    "iskron@iskron": true
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Enter the graph via the iskron:entry skill before acting. Addresses (AGENTS.md): graph @cloudless/fluence; focus holon #1787 (terraform-provider-cloudless); agent role #1789 (inbox: iskron_orient(focus=\\\"1789\\\")); owner role #1788 (posed_to for out-of-mandate questions).\"}}'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // \"\"' | grep -Eq '\\.claude/projects/.*/memory/' && { echo 'BLOCKED: local agent memory is forbidden entirely, not by category (AGENTS.md, Persistence rules). Route the fact: repo conventions / code facts -> AGENTS.md; project state, decisions, open questions, this repo'\\''s servers and dated duties -> the project graph @cloudless/fluence (focus #1787). This dir stays frozen at its prohibition stub.' >&2; exit 2; } || exit 0"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "in=$(cat); echo \"$in\" | jq -r '.tool_input.command // \"\"' | grep -q 'git push' || exit 0; fresh=$(git fetch -q origin main 2>/dev/null && git merge-base --is-ancestor origin/main HEAD && echo ok || echo 'BRANCH IS BEHIND origin/main - rebase before the next push.'); echo \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PostToolUse\\\",\\\"additionalContext\\\":\\\"A git push ran. Ask which push this was: done means MERGED - a push that only opened or updated a PR shipped nothing; record the answer where it stands and keep node bodies and modes describing what main carries. After a MERGE: update the graph from fresh artifact evidence only (reconcile with reality, advance the map, close along the axes - addressed_by records the answer, release is a separate act); sweep the whole shipped holon (#1787: switch modes on every designed node the merge realized, end the design vimarshas it resolved); work the inbox of #1789; run the stage self-check; on an open PR or a finished large stage open a cold review with the reviewer sub-agent (branch diff vs main + repo + references to every graph node in the diff); re-read the diff and nodes for borrowed PM words (ticket, backlog, sprint, epic, story, done, blocker, committed) - name each to the user and ask what it is called here, never substitute; un-intaken design/spec docs on this branch -> intake (iskron:intake, then iskron:design) before closing. Branch freshness: $fresh\\\"}}\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "in=$(cat); [ \"$(echo \"$in\" | jq -r '.stop_hook_active // false')\" = \"true\" ] && exit 0; t=$(echo \"$in\" | jq -r '.transcript_path // \"\"'); [ -r \"$t\" ] || exit 0; tail=$(tail -n 60 \"$t\"); echo \"$tail\" | grep -Eq '\"name\":\"(Write|Edit|MultiEdit|NotebookEdit|mcp__[A-Za-z_]*iskron[A-Za-z_]*__iskron_(add_[a-z]+|update|arrow|batch|delete_node))\"' && exit 0; last=$(echo \"$tail\" | grep '\"type\":\"assistant\"' | tail -n 1 | jq -r '[.message.content[]? | select(.type==\"text\") | .text] | join(\" \")' 2>/dev/null); echo \"$last\" | grep -Eiq \"(I'll start with|I will start|shall I|let me know if|if you'd like|начну с|приступлю к|если ты не против|дай знать)\" || exit 0; echo '{\"decision\":\"block\",\"reason\":\"A beginning is not announced, it is performed: make the first move of what you chose, or record the question for its addressee (a vimarsha posed_to the owner role #1788) and say that you recorded it.\"}'"
+          }
+        ]
+      }
+    ]
+  }
+}

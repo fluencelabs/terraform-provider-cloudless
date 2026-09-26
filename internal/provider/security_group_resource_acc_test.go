@@ -15,14 +15,21 @@ import (
 func securityGroupDestroy() func(*terraform.State) error {
 	c := acctest.RealClient()
 	return acctest.CheckDestroy(c, "cloudless_security_group", func(ctx context.Context, id string) error {
-		_, err := c.GetSecurityGroup(ctx, id)
-		return err
+		got, err := c.GetSecurityGroup(ctx, id)
+		if err != nil {
+			return err
+		}
+		return acctest.GoneIf(got.Status, nil)
 	})
 }
 
 func TestAccSecurityGroup_RealAPI(t *testing.T) {
 	factories := acctest.Setup(t)
-	name := "tf-acc-sg-" + tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
+	vpcID, _ := acctest.DefaultNetwork(t)
+	name := "tf-acc-sg-" + tfacctest.RandStringFromCharSet(
+		6,
+		tfacctest.CharSetAlphaNum,
+	) // API: lowercase, digits, hyphens, max 25 chars
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: factories,
@@ -30,13 +37,10 @@ func TestAccSecurityGroup_RealAPI(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: fmt.Sprintf(`
-data "cloudless_cluster" "main" {
-  region = "DE"
-}
 
 resource "cloudless_security_group" "web" {
-  cluster_id   = data.cloudless_cluster.main.id
-  name         = %q
+  vpc_id   = %[2]q
+  name         = %[1]q
   ingress_mode = "allow_listed"
   ingress {
     protocol = "tcp"
@@ -44,7 +48,7 @@ resource "cloudless_security_group" "web" {
     cidr     = "0.0.0.0/0"
   }
 }
-`, name),
+`, name, vpcID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("cloudless_security_group.web", "name", name),
 					resource.TestCheckResourceAttr("cloudless_security_group.web", "ingress_mode", "allow_listed"),
@@ -53,11 +57,10 @@ resource "cloudless_security_group" "web" {
 			},
 			{
 				Config: fmt.Sprintf(`
-data "cloudless_cluster" "main" { region = "DE" }
 
 resource "cloudless_security_group" "web" {
-  cluster_id   = data.cloudless_cluster.main.id
-  name         = %q
+  vpc_id   = %[2]q
+  name         = %[1]q
   ingress_mode = "allow_listed"
   ingress {
     protocol = "tcp"
@@ -65,8 +68,8 @@ resource "cloudless_security_group" "web" {
     cidr     = "0.0.0.0/0"
   }
 }
-`, name+"-renamed"),
-				Check: resource.TestCheckResourceAttr("cloudless_security_group.web", "name", name+"-renamed"),
+`, name+"-v2", vpcID),
+				Check: resource.TestCheckResourceAttr("cloudless_security_group.web", "name", name+"-v2"),
 			},
 			{
 				ResourceName:      "cloudless_security_group.web",

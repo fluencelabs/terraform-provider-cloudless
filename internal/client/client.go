@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -91,6 +90,16 @@ func IsConflict(err error) bool {
 	return false
 }
 
+// IsForbidden reports whether err is a 403 from the API (a scope the key
+// does not carry).
+func IsForbidden(err error) bool {
+	var ae *APIError
+	if errors.As(err, &ae) {
+		return ae.StatusCode == http.StatusForbidden
+	}
+	return false
+}
+
 // IsNotAcceptable reports whether err is a 406 from the API. The VM endpoints
 // return 406 ("VM is not in a status to ...") while a VM is briefly in a
 // transitional state — e.g. just after a public-IP attach — so callers retry
@@ -104,6 +113,19 @@ func IsNotAcceptable(err error) bool {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body, out any) error {
+	return c.doWithHeaders(ctx, method, path, query, nil, body, out)
+}
+
+// doWithHeaders is do with extra request headers — /v3 creates carry an
+// Idempotency-Key, which the OpenAPI contract marks required but the body
+// validator cannot see.
+func (c *Client) doWithHeaders(
+	ctx context.Context,
+	method, path string,
+	query url.Values,
+	headers map[string]string,
+	body, out any,
+) error {
 	u := c.endpoint + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
@@ -132,6 +154,9 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	req.Header.Set("Authorization", "X-API-KEY "+c.apiKey)
 	req.Header.Set("X-Api-Key", c.apiKey)
 	req.Header.Set("User-Agent", c.ua)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -185,7 +210,6 @@ type PaginationInfo struct {
 
 type SSHKey struct {
 	ID          string `json:"id"`
-	UserID      string `json:"userId"`
 	Name        string `json:"name"`
 	PublicKey   string `json:"publicKey"`
 	Algorithm   string `json:"algorithm"`
@@ -204,7 +228,7 @@ type sshKeysListResponse struct {
 
 func (c *Client) CreateSSHKey(ctx context.Context, req CreateSSHKeyRequest) (*SSHKey, error) {
 	var out SSHKey
-	if err := c.do(ctx, http.MethodPost, "/v1/ssh_keys", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/ssh-keys", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -215,7 +239,7 @@ func (c *Client) CreateSSHKey(ctx context.Context, req CreateSSHKeyRequest) (*SS
 func (c *Client) GetSSHKey(ctx context.Context, id string) (*SSHKey, error) {
 	q := url.Values{"ids": {id}}
 	var resp sshKeysListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/ssh_keys", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/ssh-keys", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -230,44 +254,36 @@ func (c *Client) GetSSHKey(ctx context.Context, id string) (*SSHKey, error) {
 // to recover from a create conflict by matching an existing key by body.
 func (c *Client) ListSSHKeys(ctx context.Context) ([]SSHKey, error) {
 	var resp sshKeysListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/ssh_keys", nil, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/ssh-keys", nil, nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Items, nil
 }
 
 func (c *Client) DeleteSSHKey(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/ssh_keys/delete", nil, idsBody{IDs: []string{id}}, nil)
-}
-
-type idsBody struct {
-	IDs []string `json:"ids"`
+	return c.do(ctx, http.MethodDelete, "/v3/ssh-keys/"+id, nil, nil, nil)
 }
 
 // ---------- VPCs ----------
 
+// VPC mirrors PublicVpcDto.
 type VPC struct {
-	ID             string  `json:"id"`
-	UserID         string  `json:"userId"`
-	ClusterID      string  `json:"clusterId"`
-	Name           string  `json:"name"`
-	EnableExternal *bool   `json:"enableExternal,omitempty"`
-	Status         string  `json:"status"`
-	SubnetsCount   uint32  `json:"subnetsCount"`
-	CreatedAt      string  `json:"createdAt"`
-	ReadySince     *string `json:"readySince,omitempty"`
-	RemovedAt      *string `json:"removedAt,omitempty"`
+	ID         string  `json:"id"`
+	ClusterID  string  `json:"clusterId"`
+	Name       string  `json:"name"`
+	Status     string  `json:"status"`
+	CreatedAt  string  `json:"createdAt"`
+	ReadySince *string `json:"readySince,omitempty"`
+	RemovedAt  *string `json:"removedAt,omitempty"`
 }
 
 type CreateVPCRequest struct {
-	ClusterID      string `json:"clusterId"`
-	Name           string `json:"name"`
-	EnableExternal *bool  `json:"enableExternal,omitempty"`
+	ClusterID string `json:"clusterId"`
+	Name      string `json:"name"`
 }
 
 type UpdateVPCRequest struct {
-	Name           *string `json:"name,omitempty"`
-	EnableExternal *bool   `json:"enableExternal,omitempty"`
+	Name *string `json:"name,omitempty"`
 }
 
 type vpcsListResponse struct {
@@ -277,16 +293,25 @@ type vpcsListResponse struct {
 
 func (c *Client) CreateVPC(ctx context.Context, req CreateVPCRequest) (*VPC, error) {
 	var out VPC
-	if err := c.do(ctx, http.MethodPost, "/v1/vpcs", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/vpcs", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
+// ListVPCs returns the first page of the account's VPCs.
+func (c *Client) ListVPCs(ctx context.Context) ([]VPC, error) {
+	var resp vpcsListResponse
+	if err := c.do(ctx, http.MethodGet, "/v3/vpcs", nil, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Items, nil
+}
+
 func (c *Client) GetVPC(ctx context.Context, id string) (*VPC, error) {
 	q := url.Values{"ids": {id}}
 	var resp vpcsListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/vpcs", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/vpcs", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -299,36 +324,40 @@ func (c *Client) GetVPC(ctx context.Context, id string) (*VPC, error) {
 
 func (c *Client) UpdateVPC(ctx context.Context, id string, req UpdateVPCRequest) (*VPC, error) {
 	var out VPC
-	if err := c.do(ctx, http.MethodPatch, "/v1/vpcs/"+id, nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v3/vpcs/"+id, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 func (c *Client) DeleteVPC(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/vpcs/delete", nil, idsBody{IDs: []string{id}}, nil)
+	return c.do(ctx, http.MethodDelete, "/v3/vpcs/"+id, nil, nil, nil)
 }
 
 // ---------- Subnets ----------
 
 type Subnet struct {
 	ID         string  `json:"id"`
-	UserID     string  `json:"userId"`
 	ClusterID  string  `json:"clusterId"`
 	VPCID      string  `json:"vpcId"`
 	Name       string  `json:"name"`
 	IPv4CIDR   *string `json:"ipv4Cidr,omitempty"`
 	IPv6CIDR   *string `json:"ipv6Cidr,omitempty"`
 	Status     string  `json:"status"`
+	Egress     bool    `json:"egress"`
+	IsDefault  bool    `json:"isDefault"`
 	ReadySince *string `json:"readySince,omitempty"`
 	RemovedAt  *string `json:"removedAt,omitempty"`
 }
 
+// CreateSubnetRequest mirrors CreateUserSubnetRequest: the subnet inherits its
+// cluster from the VPC in the path, so no clusterId is sent (the API rejects
+// unknown fields).
 type CreateSubnetRequest struct {
-	ClusterID string  `json:"clusterId"`
-	Name      string  `json:"name"`
-	IPv4CIDR  *string `json:"ipv4Cidr,omitempty"`
-	IPv6CIDR  *string `json:"ipv6Cidr,omitempty"`
+	Name     string  `json:"name"`
+	IPv4CIDR *string `json:"ipv4Cidr,omitempty"`
+	IPv6CIDR *string `json:"ipv6Cidr,omitempty"`
+	Egress   *bool   `json:"egress,omitempty"`
 }
 
 type UpdateSubnetRequest struct {
@@ -342,16 +371,25 @@ type subnetsListResponse struct {
 
 func (c *Client) CreateSubnet(ctx context.Context, vpcID string, req CreateSubnetRequest) (*Subnet, error) {
 	var out Subnet
-	if err := c.do(ctx, http.MethodPost, "/v1/vpc/"+vpcID+"/subnets", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/vpcs/"+vpcID+"/subnets", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
+// ListSubnets returns the first page of the account's subnets.
+func (c *Client) ListSubnets(ctx context.Context) ([]Subnet, error) {
+	var resp subnetsListResponse
+	if err := c.do(ctx, http.MethodGet, "/v3/subnets", nil, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Items, nil
+}
+
 func (c *Client) GetSubnet(ctx context.Context, id string) (*Subnet, error) {
 	q := url.Values{"ids": {id}}
 	var resp subnetsListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/subnets", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/subnets", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -364,208 +402,94 @@ func (c *Client) GetSubnet(ctx context.Context, id string) (*Subnet, error) {
 
 func (c *Client) UpdateSubnet(ctx context.Context, id string, req UpdateSubnetRequest) (*Subnet, error) {
 	var out Subnet
-	if err := c.do(ctx, http.MethodPatch, "/v1/subnets/"+id, nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v3/subnets/"+id, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 func (c *Client) DeleteSubnet(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/subnets/delete", nil, idsBody{IDs: []string{id}}, nil)
+	return c.do(ctx, http.MethodDelete, "/v3/subnets/"+id, nil, nil, nil)
 }
 
 // ---------- VMs ----------
 
+// VM mirrors PublicVmView. Since 0.14.0 the view names ids only: the subnets
+// and the public address live on the interfaces, not on the VM.
 type VM struct {
-	ID                string   `json:"id"`
-	UserID            string   `json:"userId"`
-	ClusterID         string   `json:"clusterId"`
-	ConfigurationID   string   `json:"configurationId"`
-	Name              string   `json:"name"`
-	Status            string   `json:"status"`
-	RestartRequired   bool     `json:"restartRequired"`
-	BootDisk          *string  `json:"bootDisk,omitempty"`
-	DataDisks         []string `json:"dataDisks"`
-	Subnets           []string `json:"subnets"`
-	SSHKeys           []string `json:"sshKeys"`
-	NetworkInterfaces []string `json:"networkInterfaces"`
-	PublicIP          *string  `json:"publicIp,omitempty"`
-	ReadySince        *string  `json:"readySince,omitempty"`
-	LastPaidAt        *string  `json:"lastPaidAt,omitempty"`
-	PaidUntil         *string  `json:"paidUntil,omitempty"`
-	TerminatedAt      *string  `json:"terminatedAt,omitempty"`
-	CreatedAt         string   `json:"createdAt"`
-	UpdatedAt         string   `json:"updatedAt"`
-}
-
-// VMBootDisk and VMDataDisk follow the OpenAPI `oneOf` pattern: either an
-// existing storage ID (string) or a CreateUserStorageRequest. The provider
-// only supports the inline-create form for now; users who want to attach
-// existing volumes can add storage attachment as a follow-up.
-type VMBootDisk struct {
-	StorageID *string                  `json:"-"`
-	Create    *CreateUserStorageInline `json:"-"`
-}
-
-func (b VMBootDisk) MarshalJSON() ([]byte, error) {
-	if b.StorageID != nil {
-		return json.Marshal(*b.StorageID)
-	}
-	return json.Marshal(b.Create)
-}
-
-type CreateUserStorageInline struct {
-	ClusterID   string `json:"clusterId"`
-	Name        string `json:"name"`
-	StorageType string `json:"storageType"`
-	VolumeGb    uint32 `json:"volumeGb"`
-	Replicated  bool   `json:"replicated"`
-	OSImage     string `json:"osImage,omitempty"`
-}
-
-type CreateVMRequest struct {
+	ID              string     `json:"id"`
 	ClusterID       string     `json:"clusterId"`
-	Name            string     `json:"name"`
 	ConfigurationID string     `json:"configurationId"`
-	BootDisk        VMBootDisk `json:"bootDisk"`
-	DataDisks       []string   `json:"dataDisks,omitempty"`
-	SSHKeys         []string   `json:"sshKeys,omitempty"`
+	Name            string     `json:"name"`
+	Status          string     `json:"status"`
+	RestartRequired bool       `json:"restartRequired"`
+	HasCloudInit    bool       `json:"hasCloudInit"`
+	BootDisk        *string    `json:"bootDiskId"`
+	DataDisks       []string   `json:"dataDiskIds"`
+	SSHKeys         []string   `json:"sshKeyIds"`
+	Interfaces      []string   `json:"interfaceIds"`
+	Failure         *VMFailure `json:"failure,omitempty"`
+	ReadySince      *string    `json:"readySince,omitempty"`
+	TerminatedAt    *string    `json:"terminatedAt,omitempty"`
+	CreatedAt       string     `json:"createdAt"`
+	UpdatedAt       string     `json:"updatedAt"`
 }
 
-type UpdateVMRequest struct {
-	Name *string `json:"name,omitempty"`
+// VMFailure is PublicVmFailure: why a VM did not come up.
+type VMFailure struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
-type vmsListResponse struct {
-	Items      []VM           `json:"items"`
-	Pagination PaginationInfo `json:"pagination"`
-}
-
-func (c *Client) CreateVM(ctx context.Context, req CreateVMRequest) (*VM, error) {
+// GetVM reads one VM (GET /v3/vms/{id}); a terminated VM stays readable.
+func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
 	var out VM
-	if err := c.do(ctx, http.MethodPost, "/v2/vms", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/vms/"+id, nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
-	q := url.Values{"ids": {id}}
-	var resp vmsListResponse
-	if err := c.do(ctx, http.MethodGet, "/v2/vms", q, nil, &resp); err != nil {
-		return nil, err
-	}
-	for i := range resp.Items {
-		if resp.Items[i].ID == id {
-			return &resp.Items[i], nil
+// TerminateVM terminates a live VM (POST /v3/vms/{id}/terminate). A draft has
+// never been allocated and is discarded with DeleteVMDraft instead. Like the
+// create, this one carries a required Idempotency-Key.
+func (c *Client) TerminateVM(ctx context.Context, id string) error {
+	headers := map[string]string{"Idempotency-Key": newIdempotencyKey()}
+	return c.doWithHeaders(ctx, http.MethodPost, "/v3/vms/"+id+"/terminate", nil, headers, nil, nil)
+}
+
+// AddVMStorages attaches data disks one by one (POST /v3/vms/{id}/storages);
+// a bare storage-id string selects the existing-disk variant of the body.
+func (c *Client) AddVMStorages(ctx context.Context, vmID string, storageIDs []string) error {
+	for _, id := range storageIDs {
+		if err := c.do(ctx, http.MethodPost, "/v3/vms/"+vmID+"/storages", nil, id, nil); err != nil {
+			return err
 		}
 	}
-	return nil, &APIError{StatusCode: http.StatusNotFound, Message: "vm not found"}
+	return nil
 }
 
-func (c *Client) UpdateVM(ctx context.Context, id string, req UpdateVMRequest) (*VM, error) {
-	var out VM
-	if err := c.do(ctx, http.MethodPatch, "/v2/vms/"+id, nil, req, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-func (c *Client) TerminateVM(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v2/vms/"+id+"/terminate", nil, nil, nil)
-}
-
-type vmStoragesBody struct {
-	DataDisks []string `json:"dataDisks"`
-}
-
-func (c *Client) AddVMStorages(ctx context.Context, vmID string, storageIDs []string) error {
-	return c.do(ctx, http.MethodPost, "/v2/vms/"+vmID+"/storages/add", nil, vmStoragesBody{DataDisks: storageIDs}, nil)
-}
-
+// RemoveVMStorages detaches data disks one by one
+// (DELETE /v3/vms/{id}/storages/{storage_id}).
 func (c *Client) RemoveVMStorages(ctx context.Context, vmID string, storageIDs []string) error {
-	return c.do(
-		ctx,
-		http.MethodPost,
-		"/v2/vms/"+vmID+"/storages/remove",
-		nil,
-		vmStoragesBody{DataDisks: storageIDs},
-		nil,
-	)
+	for _, id := range storageIDs {
+		if err := c.do(ctx, http.MethodDelete, "/v3/vms/"+vmID+"/storages/"+id, nil, nil, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (c *Client) AddVMPublicIP(ctx context.Context, vmID, publicIPID string) error {
-	body := struct {
-		PublicIPID string `json:"publicIpId"`
-	}{PublicIPID: publicIPID}
-	return c.do(ctx, http.MethodPost, "/v2/vms/"+vmID+"/public_ip/add", nil, body, nil)
-}
-
-func (c *Client) RemoveVMPublicIP(ctx context.Context, vmID string) error {
-	return c.do(ctx, http.MethodPost, "/v2/vms/"+vmID+"/public_ip/remove", nil, nil, nil)
-}
-
-// RestartVM hard-restarts a VM (POST /v2/vms/{id}/restart) and returns the
-// updated VM. Operations such as attaching a public IP or security group flag
-// the VM restart_required; the change does not take effect until this restart.
+// RestartVM hard-restarts a live VM (POST /v3/vms/{id}/restart) and returns
+// the updated VM. Operations such as attaching a public IP or security group
+// flag the VM restart_required; the change does not take effect until this
+// restart.
 func (c *Client) RestartVM(ctx context.Context, vmID string) (*VM, error) {
 	var out VM
-	if err := c.do(ctx, http.MethodPost, "/v2/vms/"+vmID+"/restart", nil, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/vms/"+vmID+"/restart", nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
-}
-
-// VMNetworkInterface is one of the network interfaces attached to a VM. Today
-// the provider only needs the ID + the optional security group binding so the
-// security-group attachment resource can manage it.
-type VMNetworkInterface struct {
-	ID              string  `json:"id"`
-	SecurityGroupID *string `json:"securityGroupId,omitempty"`
-}
-
-func (c *Client) ListVMInterfaces(ctx context.Context, vmID string) ([]VMNetworkInterface, error) {
-	var out []VMNetworkInterface
-	if err := c.do(ctx, http.MethodGet, "/v2/vms/"+vmID+"/interfaces", nil, nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *Client) UpdateVMInterface(ctx context.Context, vmID, interfaceID string, securityGroupID *string) error {
-	body := struct {
-		SecurityGroupID *string `json:"securityGroupId"`
-	}{SecurityGroupID: securityGroupID}
-	return c.do(ctx, http.MethodPatch, "/v2/vms/"+vmID+"/interfaces/"+interfaceID, nil, body, nil)
-}
-
-// FindVMByInterface lists VMs and returns the one whose networkInterfaces
-// contains the given interface_id. Returns *APIError 404 if no VM owns it.
-//
-// TODO(fluence-api): replace with /v2/vms?interfaces=<id> when the API
-// adds the filter — this scan is O(N) over the user's whole fleet.
-func (c *Client) FindVMByInterface(ctx context.Context, interfaceID string) (*VM, error) {
-	// The API doesn't expose an interface→vm filter. Walk the user's VMs in
-	// pages, indexing pages 1..N as the server reports them.
-	const maxIters = 10000 // ~2M VMs at per_page=200; defensive cap if pagination metadata never converges.
-	nextPage := uint64(1)
-	for range maxIters {
-		q := url.Values{"page": {FormatPage(nextPage)}, "per_page": {"200"}}
-		var resp vmsListResponse
-		if err := c.do(ctx, http.MethodGet, "/v2/vms", q, nil, &resp); err != nil {
-			return nil, err
-		}
-		for i := range resp.Items {
-			if slices.Contains(resp.Items[i].NetworkInterfaces, interfaceID) {
-				return &resp.Items[i], nil
-			}
-		}
-		if resp.Pagination.CurrentPage >= uint64(resp.Pagination.TotalPages) {
-			return nil, &APIError{StatusCode: http.StatusNotFound, Message: "no VM owns interface " + interfaceID}
-		}
-		nextPage = resp.Pagination.CurrentPage + 1
-	}
-	return nil, fmt.Errorf("FindVMByInterface: pagination did not terminate after %d iterations", maxIters)
 }
 
 // ---------- Hardware (data sources) ----------
@@ -573,17 +497,21 @@ func (c *Client) FindVMByInterface(ctx context.Context, interfaceID string) (*VM
 type Cluster struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-	// DCID is the only snake_case field in the Cluster wire shape — the
-	// Fluence API spec is inconsistent here. Don't "fix" to dcId.
-	DCID string `json:"dc_id"`
+	DCID string `json:"dcId"`
+}
+
+// collection is the CollectionResponse_* envelope the catalog endpoints
+// (clusters, datacenters, VM configurations, default images) return.
+type collection[T any] struct {
+	Items []T `json:"items"`
 }
 
 func (c *Client) ListClusters(ctx context.Context) ([]Cluster, error) {
-	var out []Cluster
-	if err := c.do(ctx, http.MethodGet, "/v1/clusters", nil, nil, &out); err != nil {
+	var out collection[Cluster]
+	if err := c.do(ctx, http.MethodGet, "/v3/clusters", nil, nil, &out); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return out.Items, nil
 }
 
 type VMConfiguration struct {
@@ -599,31 +527,33 @@ type VMConfiguration struct {
 }
 
 func (c *Client) ListVMConfigurations(ctx context.Context) ([]VMConfiguration, error) {
-	var out []VMConfiguration
-	if err := c.do(ctx, http.MethodGet, "/v1/configurations/virtual_machines", nil, nil, &out); err != nil {
+	var out collection[VMConfiguration]
+	if err := c.do(ctx, http.MethodGet, "/v3/configurations", nil, nil, &out); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return out.Items, nil
 }
 
+// DefaultImage mirrors PublicImageDto. The catalog no longer publishes a
+// download URL: a disk names the image by id.
 type DefaultImage struct {
 	ID           string `json:"id"`
 	Slug         string `json:"slug"`
 	Name         string `json:"name"`
 	Distribution string `json:"distribution"`
-	DownloadURL  string `json:"downloadUrl"`
 	Username     string `json:"username"`
-	IconURL      string `json:"iconUrl"`
+	BootMode     string `json:"bootMode"`
+	IsDefault    bool   `json:"isDefault"`
 	CreatedAt    string `json:"createdAt"`
 	UpdatedAt    string `json:"updatedAt"`
 }
 
 func (c *Client) ListDefaultImages(ctx context.Context) ([]DefaultImage, error) {
-	var out []DefaultImage
-	if err := c.do(ctx, http.MethodGet, "/v1/storages/default_images", nil, nil, &out); err != nil {
+	var out collection[DefaultImage]
+	if err := c.do(ctx, http.MethodGet, "/v3/images", nil, nil, &out); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return out.Items, nil
 }
 
 // ---------- Datacenters ----------
@@ -639,11 +569,11 @@ type Datacenter struct {
 }
 
 func (c *Client) ListDatacenters(ctx context.Context) ([]Datacenter, error) {
-	var out []Datacenter
-	if err := c.do(ctx, http.MethodGet, "/v1/datacenters", nil, nil, &out); err != nil {
+	var out collection[Datacenter]
+	if err := c.do(ctx, http.MethodGet, "/v3/datacenters", nil, nil, &out); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return out.Items, nil
 }
 
 // EnrichedCluster is a Cluster joined with its Datacenter. Used by data
@@ -876,7 +806,7 @@ func (r *SGRemote) UnmarshalJSON(b []byte) error {
 // Note the create endpoint models each direction as Option<Vec<…>> — an array
 // or an absent field — NOT the {type, rules} object used by reads and updates.
 type CreateSecurityGroupRequest struct {
-	ClusterID    string               `json:"clusterId"`
+	VPCID        string               `json:"vpcId"`
 	Name         string               `json:"name"`
 	IngressRules *[]SecurityGroupRule `json:"ingressRules,omitempty"`
 	EgressRules  *[]SecurityGroupRule `json:"egressRules,omitempty"`
@@ -912,7 +842,7 @@ type sgListResponse struct {
 
 func (c *Client) CreateSecurityGroup(ctx context.Context, req CreateSecurityGroupRequest) (*SecurityGroup, error) {
 	var out SecurityGroup
-	if err := c.do(ctx, http.MethodPost, "/v1/security_groups", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/security-groups", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -921,7 +851,7 @@ func (c *Client) CreateSecurityGroup(ctx context.Context, req CreateSecurityGrou
 func (c *Client) GetSecurityGroup(ctx context.Context, id string) (*SecurityGroup, error) {
 	q := url.Values{"ids": {id}}
 	var resp sgListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/security_groups", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/security-groups", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -938,29 +868,33 @@ func (c *Client) UpdateSecurityGroup(
 	req UpdateSecurityGroupRequest,
 ) (*SecurityGroup, error) {
 	var out SecurityGroup
-	if err := c.do(ctx, http.MethodPatch, "/v1/security_groups/"+id, nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v3/security-groups/"+id, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 func (c *Client) DeleteSecurityGroup(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/security_groups/delete", nil, idsBody{IDs: []string{id}}, nil)
+	return c.do(ctx, http.MethodDelete, "/v3/security-groups/"+id, nil, nil, nil)
 }
 
 // ---------- Storage ----------
 
+// Storage mirrors PublicStorageDto. A boot disk is one built from an image;
+// the role it used to carry is gone.
 type Storage struct {
-	ID          string   `json:"id"`
-	UserID      string   `json:"userId"`
-	ClusterID   string   `json:"clusterId"`
-	Name        string   `json:"name"`
-	StorageType string   `json:"storageType"`
-	Status      string   `json:"status"`
-	Role        string   `json:"role"`
-	VolumeGb    uint64   `json:"volumeGb"`
-	AttachedTo  []string `json:"attachedTo"`
-	CreatedAt   string   `json:"createdAt"`
+	ID            string   `json:"id"`
+	ClusterID     string   `json:"clusterId"`
+	Name          string   `json:"name"`
+	StorageType   string   `json:"storageType"`
+	Status        string   `json:"status"`
+	VolumeGb      uint64   `json:"volumeGb"`
+	Replicated    bool     `json:"replicated"`
+	ImageID       *string  `json:"imageId"`
+	BootMode      *string  `json:"bootMode,omitempty"`
+	AttachedVMIDs []string `json:"attachedVmIds"`
+	CreatedAt     string   `json:"createdAt"`
+	UpdatedAt     string   `json:"updatedAt"`
 }
 
 type CreateStorageRequest struct {
@@ -969,7 +903,8 @@ type CreateStorageRequest struct {
 	StorageType string `json:"storageType"`
 	VolumeGb    uint32 `json:"volumeGb"`
 	Replicated  bool   `json:"replicated"`
-	OSImage     string `json:"osImage,omitempty"`
+	// Source names the image a boot disk is built from; a data disk has none.
+	Source *ImageSource `json:"source,omitempty"`
 }
 
 type UpdateStorageRequest struct {
@@ -984,7 +919,7 @@ type storageListResponse struct {
 
 func (c *Client) CreateStorage(ctx context.Context, req CreateStorageRequest) (*Storage, error) {
 	var out Storage
-	if err := c.do(ctx, http.MethodPost, "/v1/storages", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/storages", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -993,7 +928,7 @@ func (c *Client) CreateStorage(ctx context.Context, req CreateStorageRequest) (*
 func (c *Client) GetStorage(ctx context.Context, id string) (*Storage, error) {
 	q := url.Values{"ids": {id}}
 	var resp storageListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/storages", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/storages", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -1006,28 +941,35 @@ func (c *Client) GetStorage(ctx context.Context, id string) (*Storage, error) {
 
 func (c *Client) UpdateStorage(ctx context.Context, id string, req UpdateStorageRequest) (*Storage, error) {
 	var out Storage
-	if err := c.do(ctx, http.MethodPatch, "/v1/storages/"+id, nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v3/storages/"+id, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 func (c *Client) DeleteStorage(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/storages/delete", nil, idsBody{IDs: []string{id}}, nil)
+	return c.do(ctx, http.MethodDelete, "/v3/storages/"+id, nil, nil, nil)
 }
 
 // ---------- Public IPs ----------
 
 type PublicIP struct {
-	ID          string  `json:"id"`
-	UserID      string  `json:"userId"`
-	ClusterID   string  `json:"clusterId"`
-	Name        string  `json:"name"`
-	AddressType string  `json:"addressType"`
-	Address     *string `json:"address,omitempty"`
-	Status      string  `json:"status"`
-	AttachedTo  *string `json:"attachedTo,omitempty"`
-	CreatedAt   string  `json:"createdAt"`
+	ID          string       `json:"id"`
+	UserID      string       `json:"userId"`
+	ClusterID   string       `json:"clusterId"`
+	Name        string       `json:"name"`
+	AddressType string       `json:"addressType"`
+	Address     *string      `json:"address,omitempty"`
+	Status      string       `json:"status"`
+	AttachedTo  *VMReference `json:"attachedTo,omitempty"`
+	CreatedAt   string       `json:"createdAt"`
+}
+
+// VMReference is the UserVmReference the API surfaces where a resource is
+// attached to a VM (id + name, so callers avoid a second lookup).
+type VMReference struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type CreatePublicIPRequest struct {
@@ -1047,7 +989,7 @@ type publicIPListResponse struct {
 
 func (c *Client) CreatePublicIP(ctx context.Context, req CreatePublicIPRequest) (*PublicIP, error) {
 	var out PublicIP
-	if err := c.do(ctx, http.MethodPost, "/v1/public_ips", nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v3/public-ips", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -1056,7 +998,7 @@ func (c *Client) CreatePublicIP(ctx context.Context, req CreatePublicIPRequest) 
 func (c *Client) GetPublicIP(ctx context.Context, id string) (*PublicIP, error) {
 	q := url.Values{"ids": {id}}
 	var resp publicIPListResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/public_ips", q, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v3/public-ips", q, nil, &resp); err != nil {
 		return nil, err
 	}
 	for i := range resp.Items {
@@ -1069,12 +1011,12 @@ func (c *Client) GetPublicIP(ctx context.Context, id string) (*PublicIP, error) 
 
 func (c *Client) UpdatePublicIP(ctx context.Context, id string, req UpdatePublicIPRequest) (*PublicIP, error) {
 	var out PublicIP
-	if err := c.do(ctx, http.MethodPatch, "/v1/public_ips/"+id, nil, req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v3/public-ips/"+id, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 func (c *Client) DeletePublicIP(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodPost, "/v1/public_ips/delete", nil, idsBody{IDs: []string{id}}, nil)
+	return c.do(ctx, http.MethodDelete, "/v3/public-ips/"+id, nil, nil, nil)
 }
