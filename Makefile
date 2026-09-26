@@ -32,7 +32,9 @@ vet:
 	go vet ./...
 
 test:
-	go test ./... -count=1 -race
+	# -race plus a mock server and a Terraform plan per test puts the provider
+	# package well past Go's 10-minute default.
+	go test ./... -count=1 -race -timeout 30m
 
 # Live acceptance tests against the endpoint in FLUENCE_ENDPOINT (stage by
 # default via .env); needs FLUENCE_API_KEY. Never part of `check`.
