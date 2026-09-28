@@ -41,6 +41,7 @@ type Server struct {
 	subnetWiringOnce  sync.Once
 	clusterMap        map[string]map[string]any
 	catalogsWiring    sync.Once
+	estimatesWiring   sync.Once
 	clustersWiring    sync.Once
 	dcMap             map[string]map[string]any
 	datacentersWiring sync.Once
@@ -118,6 +119,7 @@ func New() *Server {
 	s.wireVPCsOnce()
 	s.wireSubnetsOnce()
 	s.wireCatalogsOnce()
+	s.wireEstimatesOnce()
 	s.wireClustersOnce()
 	s.wireDCsOnce()
 	s.wireSGsOnce()
