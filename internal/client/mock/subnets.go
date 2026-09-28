@@ -151,6 +151,10 @@ func subnetWire(rec *subnetRecord) map[string]any {
 // handleSubnetItem serves PATCH and DELETE on /v3/subnets/{id}.
 func (s *Server) handleSubnetItem(w http.ResponseWriter, r *http.Request) {
 	parts := splitPath(r.URL.Path)
+	if len(parts) == resourcePathParts+1 && parts[3] == "default" && r.Method == http.MethodPost {
+		s.setDefaultSubnet(w, parts[2])
+		return
+	}
 	if len(parts) != resourcePathParts {
 		s.notFound(w, r)
 		return
@@ -188,4 +192,25 @@ func (s *Server) handleSubnetItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, subnetWire(rec))
+}
+
+// setDefaultSubnet moves the default flag onto this subnet, taking it from
+// whichever subnet of the same VPC held it.
+func (s *Server) setDefaultSubnet(w http.ResponseWriter, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.subnetMap[id]
+	if !ok {
+		s.writeError(w, "subnet not found")
+		return
+	}
+	var previous any
+	for _, other := range s.subnetMap {
+		if other.VPCID == rec.VPCID && other.IsDefault && other.ID != id {
+			previous = other.ID
+			other.IsDefault = false
+		}
+	}
+	rec.IsDefault = true
+	s.writeJSON(w, http.StatusOK, map[string]any{"subnetId": id, "previousDefaultSubnetId": previous})
 }

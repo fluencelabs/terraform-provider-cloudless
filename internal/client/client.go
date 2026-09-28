@@ -400,6 +400,13 @@ func (c *Client) GetSubnet(ctx context.Context, id string) (*Subnet, error) {
 	return nil, &APIError{StatusCode: http.StatusNotFound, Message: "subnet not found"}
 }
 
+// SetDefaultSubnet makes a subnet the default one of its VPC — the subnet a
+// VM lands on when it names none. The receipt says which subnet held the flag
+// before. There is no way to clear the flag: it moves, it does not vanish.
+func (c *Client) SetDefaultSubnet(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodPost, "/v3/subnets/"+id+"/default", nil, nil, nil)
+}
+
 func (c *Client) UpdateSubnet(ctx context.Context, id string, req UpdateSubnetRequest) (*Subnet, error) {
 	var out Subnet
 	if err := c.do(ctx, http.MethodPatch, "/v3/subnets/"+id, nil, req, &out); err != nil {

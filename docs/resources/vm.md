@@ -84,6 +84,7 @@ resource "cloudless_vm" "app" {
 ### Optional
 
 - `boot_disk` (Block, Optional) Boot disk: either reference an existing storage_id, or supply volume_gb + image_id (+ name) to create one from the image catalog while the VM is a draft. The boot disk cannot be changed in place; any modification forces a new VM. (see [below for nested schema](#nestedblock--boot_disk))
+- `cloud_init` (String, Sensitive) cloud-init user data, at most 16384 bytes. The API accepts it only while the VM is a draft, so changing it builds a new VM. It is never readable back either — the API reports only whether some data is set — so drift in the text itself cannot be detected.
 - `data_disk_ids` (List of String) IDs of data storage volumes to attach. Add/remove via the smart Update path; not a force-replace.
 - `network_interface` (Block List) Network interfaces of the VM. type = "private" binds a subnet (subnet_id); type = "public" attaches an existing cloudless_public_ip (public_ip_id) or, when public_ip_id is omitted, makes the VM create and own a public IP of address_type that is released on destroy. Exactly one private interface is the default, and it may leave subnet_id out to stay on the cluster's default subnet — so a VM needs no VPC or subnet of its own. Omit the blocks entirely and the network is left to the API. Interfaces are assembled before the VM is provisioned, so no restart is needed. On a live VM interfaces can be added and removed, their security group changed, and the default interface repointed to another subnet of the same cluster (a restart, not a new VM); changing static_ips or a VM-owned public IP forces a new VM. (see [below for nested schema](#nestedblock--network_interface))
 - `ssh_key_ids` (List of String) SSH keys to install at first boot. Changing this forces a new VM — Fluence applies SSH keys at create time only.
@@ -92,6 +93,7 @@ resource "cloudless_vm" "app" {
 
 - `boot_disk_id` (String)
 - `created_at` (String)
+- `has_cloud_init` (Boolean) Whether the VM carries cloud-init user data. The content itself is never returned.
 - `id` (String) The ID of this resource.
 - `network_interface_ids` (List of String)
 - `public_ip_id` (String) ID of the public IP attached to the VM, if any (mirror of the public network_interface block).

@@ -35,11 +35,19 @@ type subnetModel struct {
 	Status    types.String `tfsdk:"status"`
 }
 
-func (r *subnetResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+func (r *subnetResource) Metadata(
+	_ context.Context,
+	req resource.MetadataRequest,
+	resp *resource.MetadataResponse,
+) {
 	resp.TypeName = req.ProviderTypeName + "_subnet"
 }
 
-func (r *subnetResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *subnetResource) Schema(
+	_ context.Context,
+	_ resource.SchemaRequest,
+	resp *resource.SchemaResponse,
+) {
 	resp.Schema = schema.Schema{
 		Description: "A subnet inside a Fluence VPC.",
 		Attributes: map[string]schema.Attribute{
@@ -95,8 +103,12 @@ func (r *subnetResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					"An IPv6-only subnet must set it to false — the API does not support egress there.",
 			},
 			"is_default": schema.BoolAttribute{
-				Computed:    true,
-				Description: "Whether this is the cluster's default subnet — the one a VM lands on with no network_interface block.",
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+				Description: "Whether this is its VPC's default subnet — the one a VM lands on with no " +
+					"network_interface block. Setting it true moves the flag here from whichever subnet held it. " +
+					"The flag cannot be cleared, only moved: make another subnet the default instead.",
 			},
 			"status": schema.StringAttribute{Computed: true},
 		},
@@ -144,11 +156,19 @@ func (ipv6OnlyHasNoEgress) ValidateResource(
 	}
 }
 
-func (r *subnetResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *subnetResource) Configure(
+	_ context.Context,
+	req resource.ConfigureRequest,
+	resp *resource.ConfigureResponse,
+) {
 	r.c = clientFromProviderData(req.ProviderData, &resp.Diagnostics)
 }
 
-func (r *subnetResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+func (r *subnetResource) Create(
+	ctx context.Context,
+	req resource.CreateRequest,
+	resp *resource.CreateResponse,
+) {
 	var plan subnetModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -183,12 +203,68 @@ func (r *subnetResource) Create(ctx context.Context, req resource.CreateRequest,
 		resp.Diagnostics.AddError("Waiting for subnet failed", err.Error())
 		return
 	}
+	if out, err = r.applyDefault(ctx, plan.IsDefault, out); err != nil {
+		resp.Diagnostics.AddError("Set default subnet failed", err.Error())
+		return
+	}
 
 	r.fill(&plan, out)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *subnetResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+// ModifyPlan refuses to put the default flag out before anything is applied:
+// the flag moves between subnets and cannot be cleared, so the user learns it
+// while the plan is still a plan.
+func (r *subnetResource) ModifyPlan(
+	ctx context.Context,
+	req resource.ModifyPlanRequest,
+	resp *resource.ModifyPlanResponse,
+) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var plan, state subnetModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if state.IsDefault.ValueBool() && !plan.IsDefault.IsUnknown() && !plan.IsDefault.ValueBool() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("is_default"),
+			"Unsupported subnet change",
+			"is_default cannot be turned off: the flag moves between subnets, it does not vanish — "+
+				"set is_default on the subnet that should hold it instead.",
+		)
+	}
+}
+
+// applyDefault moves the VPC'"'"'s default flag onto this subnet when the
+// configuration asks for it.
+func (r *subnetResource) applyDefault(
+	ctx context.Context,
+	want types.Bool,
+	sn *client.Subnet,
+) (*client.Subnet, error) {
+	if want.IsNull() || want.IsUnknown() || want.ValueBool() == sn.IsDefault {
+		return sn, nil
+	}
+	if !want.ValueBool() {
+		// ModifyPlan refuses this before an apply starts; reaching it here
+		// would mean the plan and the API disagreed in between.
+		return sn, nil
+	}
+	if err := r.c.SetDefaultSubnet(ctx, sn.ID); err != nil {
+		return nil, err
+	}
+	return r.c.GetSubnet(ctx, sn.ID)
+}
+
+func (r *subnetResource) Read(
+	ctx context.Context,
+	req resource.ReadRequest,
+	resp *resource.ReadResponse,
+) {
 	var state subnetModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -211,7 +287,11 @@ func (r *subnetResource) Read(ctx context.Context, req resource.ReadRequest, res
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *subnetResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+func (r *subnetResource) Update(
+	ctx context.Context,
+	req resource.UpdateRequest,
+	resp *resource.UpdateResponse,
+) {
 	var plan, state subnetModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -234,10 +314,24 @@ func (r *subnetResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 		r.fill(&plan, got)
 	}
+	got, derr := r.c.GetSubnet(ctx, state.ID.ValueString())
+	if derr != nil {
+		resp.Diagnostics.AddError("Read subnet failed", derr.Error())
+		return
+	}
+	if got, derr = r.applyDefault(ctx, plan.IsDefault, got); derr != nil {
+		resp.Diagnostics.AddError("Set default subnet failed", derr.Error())
+		return
+	}
+	r.fill(&plan, got)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *subnetResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+func (r *subnetResource) Delete(
+	ctx context.Context,
+	req resource.DeleteRequest,
+	resp *resource.DeleteResponse,
+) {
 	var state subnetModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {

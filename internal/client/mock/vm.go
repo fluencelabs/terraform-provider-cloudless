@@ -10,6 +10,7 @@ type vmRecord struct {
 	SSHKeys                                                        []string
 	Interfaces                                                     []vmInterfaceRecord
 	RestartRequired                                                bool
+	HasCloudInit                                                   bool
 	CreatedAt, UpdatedAt                                           string
 }
 
@@ -18,9 +19,6 @@ type vmRecord struct {
 // wireVMs locks briefly only for map init, then performs mutex-free mux
 // registration.
 func (s *Server) wireVMsOnce() { s.vmWiring.Do(s.wireVMs) }
-
-// VM subpath segment counts once split.
-const ()
 
 func (s *Server) wireVMs() {
 	s.mu.Lock()
@@ -82,7 +80,7 @@ func vmWire(rec *vmRecord) map[string]any {
 		"name":            rec.Name,
 		"status":          rec.Status,
 		"restartRequired": rec.RestartRequired,
-		"hasCloudInit":    false,
+		"hasCloudInit":    rec.HasCloudInit,
 		"dataDiskIds":     rec.DataDisks,
 		"sshKeyIds":       rec.SSHKeys,
 		"interfaceIds":    ifaceIDs,

@@ -44,8 +44,10 @@ type vmModel struct {
 	NICs        []vmNICModel     `tfsdk:"network_interface"`
 	DataDiskIDs types.List       `tfsdk:"data_disk_ids"`
 	SSHKeyIDs   types.List       `tfsdk:"ssh_key_ids"`
+	CloudInit   types.String     `tfsdk:"cloud_init"`
 
 	Status            types.String `tfsdk:"status"`
+	HasCloudInit      types.Bool   `tfsdk:"has_cloud_init"`
 	BootDiskID        types.String `tfsdk:"boot_disk_id"`
 	Subnets           types.List   `tfsdk:"subnet_ids"`
 	NetworkInterfaces types.List   `tfsdk:"network_interface_ids"`
@@ -66,11 +68,19 @@ type vmBootDiskModel struct {
 	ImageID   types.String `tfsdk:"image_id"`
 }
 
-func (r *vmResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+func (r *vmResource) Metadata(
+	_ context.Context,
+	req resource.MetadataRequest,
+	resp *resource.MetadataResponse,
+) {
 	resp.TypeName = req.ProviderTypeName + "_vm"
 }
 
-func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *vmResource) Schema(
+	_ context.Context,
+	_ resource.SchemaRequest,
+	resp *resource.SchemaResponse,
+) {
 	resp.Schema = schema.Schema{
 		Description: "A virtual machine on a Fluence cluster.",
 		Attributes: map[string]schema.Attribute{
@@ -109,8 +119,10 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 				},
 				Validators: []validator.List{listvalidator.ValueStringsAre(validators.UUID())},
 			},
-			"status":       schema.StringAttribute{Computed: true},
-			"boot_disk_id": schema.StringAttribute{Computed: true},
+			"cloud_init":     cloudInitAttribute(),
+			"has_cloud_init": hasCloudInitAttribute(),
+			"status":         schema.StringAttribute{Computed: true},
+			"boot_disk_id":   schema.StringAttribute{Computed: true},
 			"subnet_ids": schema.ListAttribute{
 				ElementType:   types.StringType,
 				Computed:      true,
@@ -163,7 +175,32 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 	}
 }
 
-func (r *vmResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+// cloudInitAttribute carries the user data a VM boots with. The API takes it
+// only on a draft and never gives it back, so the block below says what the
+// provider can and cannot promise about it.
+func cloudInitAttribute() schema.StringAttribute {
+	return schema.StringAttribute{
+		Optional:      true,
+		Sensitive:     true,
+		PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+		Description: "cloud-init user data, at most 16384 bytes. The API accepts it only while the VM is a " +
+			"draft, so changing it builds a new VM. It is never readable back either — the API reports only " +
+			"whether some data is set — so drift in the text itself cannot be detected.",
+	}
+}
+
+func hasCloudInitAttribute() schema.BoolAttribute {
+	return schema.BoolAttribute{
+		Computed:    true,
+		Description: "Whether the VM carries cloud-init user data. The content itself is never returned.",
+	}
+}
+
+func (r *vmResource) Configure(
+	_ context.Context,
+	req resource.ConfigureRequest,
+	resp *resource.ConfigureResponse,
+) {
 	r.c = clientFromProviderData(req.ProviderData, &resp.Diagnostics)
 }
 
@@ -181,7 +218,9 @@ func bootDiskToAPI(d *vmBootDiskModel) (client.DraftBootDisk, error) {
 		return client.DraftBootDisk{StorageID: d.StorageID.ValueString()}, nil
 	}
 	if d.VolumeGb.IsNull() || d.ImageID.IsNull() {
-		return client.DraftBootDisk{}, errors.New("inline boot_disk requires volume_gb and image_id")
+		return client.DraftBootDisk{}, errors.New(
+			"inline boot_disk requires volume_gb and image_id",
+		)
 	}
 	disk := client.DraftBootDisk{
 		VolumeGb: uint32(d.VolumeGb.ValueInt64()),
@@ -195,7 +234,11 @@ func bootDiskToAPI(d *vmBootDiskModel) (client.DraftBootDisk, error) {
 
 // (stringsFromList and listFromStrings live in util.go for use by other resources.)
 
-func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+func (r *vmResource) Create(
+	ctx context.Context,
+	req resource.CreateRequest,
+	resp *resource.CreateResponse,
+) {
 	var plan vmModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -305,6 +348,9 @@ func (r *vmResource) createDraft(
 	if !plan.SSHKeyIDs.IsNull() {
 		req.SSHKeyIDs = stringsFromList(plan.SSHKeyIDs)
 	}
+	if knownString(plan.CloudInit) {
+		req.CloudInit = plan.CloudInit.ValueString()
+	}
 	for _, storageID := range stringsFromList(plan.DataDiskIDs) {
 		req.DataDisks = append(req.DataDisks, client.DraftDataDisk{StorageID: storageID})
 	}
@@ -338,7 +384,13 @@ func (r *vmResource) createDraft(
 // discardDraft deletes a draft that failed mid-assembly, plus the public IPs
 // it created, and wraps the step's error. The failure may be the caller's
 // context dying, so the discard runs on a fresh deadline.
-func (r *vmResource) discardDraft(ctx context.Context, id string, ownedIPs []string, step string, err error) error {
+func (r *vmResource) discardDraft(
+	ctx context.Context,
+	id string,
+	ownedIPs []string,
+	step string,
+	err error,
+) error {
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardTimeout)
 	defer cancel()
 	if derr := r.c.DeleteVMDraft(dctx, id); derr != nil && !client.IsNotFound(derr) {
@@ -346,7 +398,13 @@ func (r *vmResource) discardDraft(ctx context.Context, id string, ownedIPs []str
 	}
 	for _, ipID := range ownedIPs {
 		if ierr := r.c.DeletePublicIP(dctx, ipID); ierr != nil && !client.IsNotFound(ierr) {
-			return fmt.Errorf("%s: %w (and releasing draft-created public IP %s failed: %w)", step, err, ipID, ierr)
+			return fmt.Errorf(
+				"%s: %w (and releasing draft-created public IP %s failed: %w)",
+				step,
+				err,
+				ipID,
+				ierr,
+			)
 		}
 	}
 	return fmt.Errorf("%s: %w", step, err)
@@ -363,7 +421,11 @@ func (r *vmResource) provisionLanded(ctx context.Context, id string, perr error)
 	return gerr == nil && vm.Status != statusDraft
 }
 
-func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+func (r *vmResource) Read(
+	ctx context.Context,
+	req resource.ReadRequest,
+	resp *resource.ReadResponse,
+) {
 	var state vmModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -388,7 +450,11 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+func (r *vmResource) Update(
+	ctx context.Context,
+	req resource.UpdateRequest,
+	resp *resource.UpdateResponse,
+) {
 	var plan, state vmModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -406,7 +472,10 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		{"Update VM", func() error { return r.updateName(ctx, id, state, plan) }},
 		{"Attach VM storages", func() error { return r.attachDataDisks(ctx, id, state, plan) }},
 		{"Detach VM storages", func() error { return r.detachDataDisks(ctx, id, state, plan) }},
-		{"Update VM network interfaces", func() error { return r.updateNICs(ctx, id, state, plan) }},
+		{
+			"Update VM network interfaces",
+			func() error { return r.updateNICs(ctx, id, state, plan) },
+		},
 	}
 	for _, st := range steps {
 		if err := st.run(); err != nil {
@@ -426,7 +495,12 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 }
 
 // refreshInto records the VM's current state after a partial update.
-func (r *vmResource) refreshInto(ctx context.Context, id string, plan *vmModel, resp *resource.UpdateResponse) {
+func (r *vmResource) refreshInto(
+	ctx context.Context,
+	id string,
+	plan *vmModel,
+	resp *resource.UpdateResponse,
+) {
 	got, err := r.c.GetVM(ctx, id)
 	if err != nil {
 		resp.Diagnostics.AddError("Read VM after partial update failed", err.Error())
@@ -456,7 +530,10 @@ func (r *vmResource) attachDataDisks(ctx context.Context, id string, state, plan
 }
 
 func (r *vmResource) detachDataDisks(ctx context.Context, id string, state, plan vmModel) error {
-	_, toRemove := diffStrings(stringsFromList(state.DataDiskIDs), stringsFromList(plan.DataDiskIDs))
+	_, toRemove := diffStrings(
+		stringsFromList(state.DataDiskIDs),
+		stringsFromList(plan.DataDiskIDs),
+	)
 	if len(toRemove) == 0 {
 		return nil
 	}
@@ -483,7 +560,11 @@ func (r *vmResource) updateNICs(ctx context.Context, id string, state, plan vmMo
 	return nil
 }
 
-func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+func (r *vmResource) Delete(
+	ctx context.Context,
+	req resource.DeleteRequest,
+	resp *resource.DeleteResponse,
+) {
 	var state vmModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -525,7 +606,10 @@ func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, res
 		(bd.StorageID.IsNull() || bd.StorageID.ValueString() == "") &&
 		!state.BootDiskID.IsNull() && state.BootDiskID.ValueString() != "" {
 		bootID := state.BootDiskID.ValueString()
-		err := retryTransient(ctx, func(ctx context.Context) error { return r.c.DeleteStorage(ctx, bootID) })
+		err := retryTransient(
+			ctx,
+			func(ctx context.Context) error { return r.c.DeleteStorage(ctx, bootID) },
+		)
 		if err != nil && !client.IsNotFound(err) {
 			resp.Diagnostics.AddError("Deleting boot disk failed", err.Error())
 		}
@@ -537,9 +621,16 @@ func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, res
 // releaseOwnedIPs deletes the public IPs the VM created for itself: they
 // have no resource of their own, and terminate does not cascade them
 // (observed on stage; graph @cloudless/fluence, node #1814).
-func (r *vmResource) releaseOwnedIPs(ctx context.Context, nics []vmNICModel, diags *diag.Diagnostics) {
+func (r *vmResource) releaseOwnedIPs(
+	ctx context.Context,
+	nics []vmNICModel,
+	diags *diag.Diagnostics,
+) {
 	for _, ipID := range ownedPublicIPs(nics) {
-		err := retryTransient(ctx, func(ctx context.Context) error { return r.c.DeletePublicIP(ctx, ipID) })
+		err := retryTransient(
+			ctx,
+			func(ctx context.Context) error { return r.c.DeletePublicIP(ctx, ipID) },
+		)
 		if err != nil && !client.IsNotFound(err) {
 			diags.AddError("Releasing VM-owned public IP "+ipID+" failed", err.Error())
 		}
@@ -566,8 +657,13 @@ func (r *vmResource) ModifyPlan(
 	// so Create/Update and the replacement rules can read it.
 	plan.NICs = resolveNICOwnership(cfg.NICs, plan.NICs)
 	for i := range plan.NICs {
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx,
-			path.Root("network_interface").AtListIndex(i).AtName("address_type"), plan.NICs[i].AddressType)...)
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(
+			ctx,
+			path.Root("network_interface").
+				AtListIndex(i).
+				AtName("address_type"),
+			plan.NICs[i].AddressType,
+		)...)
 	}
 	// Layout rules are about what the user wrote; `default` carried from
 	// state is the API's word and is not re-judged here.
@@ -584,8 +680,11 @@ func (r *vmResource) ModifyPlan(
 		return
 	}
 	if why := newNICsWithStaticIPs(state.NICs, plan.NICs); why != "" {
-		resp.Diagnostics.AddAttributeError(path.Root("network_interface"), "Unsupported network_interface change",
-			why+": the API sets static IPs only while the VM is a draft; create the VM with them or drop static_ips.")
+		resp.Diagnostics.AddAttributeError(
+			path.Root("network_interface"),
+			"Unsupported network_interface change",
+			why+": the API sets static IPs only while the VM is a draft; create the VM with them or drop static_ips.",
+		)
 		return
 	}
 	if replace, why := planNICReplacement(state.NICs, plan.NICs); replace {
@@ -599,9 +698,14 @@ func (r *vmResource) ModifyPlan(
 		// would otherwise carry stale values into the plan.
 		for _, name := range []string{"network_interface_ids", "subnet_ids"} {
 			resp.Diagnostics.Append(
-				resp.Plan.SetAttribute(ctx, path.Root(name), types.ListUnknown(types.StringType))...)
+				resp.Plan.SetAttribute(
+					ctx,
+					path.Root(name),
+					types.ListUnknown(types.StringType),
+				)...)
 		}
-		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("public_ip_id"), types.StringUnknown())...)
+		resp.Diagnostics.Append(
+			resp.Plan.SetAttribute(ctx, path.Root("public_ip_id"), types.StringUnknown())...)
 	}
 }
 
@@ -616,6 +720,7 @@ func (r *vmResource) fillMinimal(m *vmModel, id string, ownedIPs []string) {
 	m.Subnets = listFromStrings(nil)
 	m.NetworkInterfaces = listFromStrings(nil)
 	m.PublicIPID = types.StringNull()
+	m.HasCloudInit = types.BoolValue(false)
 	m.RestartRequired = types.BoolValue(false)
 	m.CreatedAt = types.StringValue("")
 	m.UpdatedAt = types.StringValue("")
@@ -676,7 +781,8 @@ func (r *vmResource) ImportState(
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 	// Mark the import so the first Read renders every interface as a block;
 	// a configuration without blocks otherwise keeps none.
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("status"), types.StringValue(statusImported))...)
+	resp.Diagnostics.Append(
+		resp.State.SetAttribute(ctx, path.Root("status"), types.StringValue(statusImported))...)
 }
 
 // fill copies API data into the model. Computed list fields use types.List
@@ -692,6 +798,7 @@ func (r *vmResource) fill(m *vmModel, v *client.VM) {
 	// The API lists these in arbitrary order (it changes across a restart);
 	// sort so the computed mirrors are stable between plan and apply.
 	m.NetworkInterfaces = listFromStrings(sortedCopy(v.Interfaces))
+	m.HasCloudInit = types.BoolValue(v.HasCloudInit)
 	m.RestartRequired = types.BoolValue(v.RestartRequired)
 	m.CreatedAt = types.StringValue(v.CreatedAt)
 	m.UpdatedAt = types.StringValue(v.UpdatedAt)

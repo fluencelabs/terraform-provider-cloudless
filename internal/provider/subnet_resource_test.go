@@ -107,3 +107,53 @@ resource "cloudless_subnet" "s" {
 		},
 	})
 }
+
+// The default flag moves onto the subnet that asks for it, and away from the
+// one that held it.
+func TestUnitSubnet_TakesTheDefaultFlag(t *testing.T) {
+	h := tfharness.New(t)
+	defer h.Close()
+	h.Mock.SeedVPC("99999999-9999-4999-8999-999999999999", "main", "cluster-X")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: h.Factories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "cloudless_subnet" "s" {
+  vpc_id     = "99999999-9999-4999-8999-999999999999"
+  name       = "demo"
+  ipv4_cidr  = "10.0.1.0/24"
+  is_default = true
+}
+`,
+				Check: resource.TestCheckResourceAttr("cloudless_subnet.s", "is_default", "true"),
+			},
+		},
+	})
+}
+
+// The flag only moves; it cannot be put out.
+func TestUnitSubnet_DefaultCannotBeCleared(t *testing.T) {
+	h := tfharness.New(t)
+	defer h.Close()
+	h.Mock.SeedVPC("99999999-9999-4999-8999-999999999999", "main", "cluster-X")
+
+	cfg := func(dflt string) string {
+		return `
+resource "cloudless_subnet" "s" {
+  vpc_id     = "99999999-9999-4999-8999-999999999999"
+  name       = "demo"
+  ipv4_cidr  = "10.0.2.0/24"
+  is_default = ` + dflt + `
+}
+`
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: h.Factories,
+		Steps: []resource.TestStep{
+			{Config: cfg("true")},
+			{Config: cfg("false"), ExpectError: regexp.MustCompile(`is_default cannot be turned off`)},
+		},
+	})
+}

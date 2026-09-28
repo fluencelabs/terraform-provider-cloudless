@@ -298,3 +298,38 @@ func TestUnitVM_PartialUpdateRefreshesState(t *testing.T) {
 		},
 	})
 }
+
+// cloud-init reaches the draft, and the VM reports carrying it. The content
+// is never returned by the API, so has_cloud_init is all there is to check.
+func TestUnitVM_CloudInit(t *testing.T) {
+	h := tfharness.New(t)
+	defer h.Close()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: h.Factories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "cloudless_vm" "app" {
+  cluster_id       = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  name             = "app"
+  configuration_id = "cfcfcfcf-cfcf-4cfc-8cfc-cfcfcfcfcfcf"
+
+  boot_disk {
+    volume_gb = 40
+    image_id  = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+  }
+
+  cloud_init = <<-EOT
+    #cloud-config
+    packages: [htop]
+  EOT
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("cloudless_vm.app", "has_cloud_init", "true"),
+				),
+			},
+		},
+	})
+}

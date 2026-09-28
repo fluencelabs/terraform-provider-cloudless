@@ -45,6 +45,7 @@ func (s *Server) createVMDraft(w http.ResponseWriter, r *http.Request) {
 		ConfigurationID string                `json:"configurationId"`
 		Name            string                `json:"name"`
 		SSHKeyIDs       []string              `json:"sshKeyIds"`
+		CloudInit       string                `json:"cloudInit"`
 		BootDisk        *draftBootDiskBody    `json:"bootDisk"`
 		DataDisks       []draftDiskRef        `json:"dataDisks"`
 		Interfaces      *[]draftInterfaceBody `json:"interfaces"`
@@ -75,6 +76,7 @@ func (s *Server) createVMDraft(w http.ResponseWriter, r *http.Request) {
 	if body.SSHKeyIDs != nil {
 		rec.SSHKeys = body.SSHKeyIDs
 	}
+	rec.HasCloudInit = body.CloudInit != ""
 
 	storageIDs := s.seedDraftDisks(rec, body.BootDisk, dataDiskRefs(body.DataDisks))
 	publicIPIDs := s.seedDraftInterfaces(rec, body.Interfaces)
