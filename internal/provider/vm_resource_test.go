@@ -23,6 +23,23 @@ func captureID(addr string, out *string) resource.TestCheckFunc {
 	}
 }
 
+// requireSameAttr pairs with captureAttr: it tells a change applied in place
+// from one applied by destroying and rebuilding, when both end in the same
+// shape.
+func requireSameAttr(addr, key string, want *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[addr]
+		if !ok {
+			return fmt.Errorf("resource %s not found in state", addr)
+		}
+		if got := rs.Primary.Attributes[key]; got != *want {
+			return fmt.Errorf("%s %s changed from %q to %q; it was applied by rebuilding, not in place",
+				addr, key, *want, got)
+		}
+		return nil
+	}
+}
+
 // requireSameID asserts that the resource's current ID equals *want — i.e.
 // that a smart-Update path did not silently fall back to recreate.
 func requireSameID(addr string, want *string) resource.TestCheckFunc {

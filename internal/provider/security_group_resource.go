@@ -99,7 +99,10 @@ func (r *sgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 				Computed:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
-			"name": schema.StringAttribute{Required: true},
+			"name": schema.StringAttribute{
+				Required:   true,
+				Validators: []validator.String{validators.ResourceName()},
+			},
 			"ingress_mode": schema.StringAttribute{
 				Optional: true, Computed: true,
 				Description: "\"allow_all\" (default), \"allow_listed\" (requires ingress blocks), or \"deny_all\".",

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -71,7 +72,10 @@ func (r *subnetResource) Schema(
 				Description: "Cluster the subnet lives on. If unset, derived from vpc_id's cluster.",
 				Validators:  []validator.String{validators.UUID()},
 			},
-			"name": schema.StringAttribute{Required: true},
+			"name": schema.StringAttribute{
+				Required:   true,
+				Validators: []validator.String{validators.ResourceName()},
+			},
 			"ipv4_cidr": schema.StringAttribute{
 				Optional: true,
 				Computed: true,
@@ -230,13 +234,19 @@ func (r *subnetResource) ModifyPlan(
 		return
 	}
 	if state.IsDefault.ValueBool() && !plan.IsDefault.IsUnknown() && !plan.IsDefault.ValueBool() {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("is_default"),
-			"Unsupported subnet change",
-			"is_default cannot be turned off: the flag moves between subnets, it does not vanish — "+
-				"set is_default on the subnet that should hold it instead.",
-		)
+		resp.Diagnostics.Append(cannotClearDefault())
 	}
+}
+
+// cannotClearDefault is the one refusal both paths give, so create and update
+// say the same thing.
+func cannotClearDefault() diag.Diagnostic {
+	return diag.NewAttributeErrorDiagnostic(
+		path.Root("is_default"),
+		"Unsupported subnet change",
+		"is_default cannot be turned off: the flag moves between subnets, it does not vanish — "+
+			"set is_default on the subnet that should hold it instead.",
+	)
 }
 
 // applyDefault moves the VPC'"'"'s default flag onto this subnet when the

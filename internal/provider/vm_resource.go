@@ -93,7 +93,10 @@ func (r *vmResource) Schema(
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 				Validators:    []validator.String{validators.UUID()},
 			},
-			"name": schema.StringAttribute{Required: true},
+			"name": schema.StringAttribute{
+				Required:   true,
+				Validators: []validator.String{validators.ResourceName()},
+			},
 			"configuration_id": schema.StringAttribute{
 				Required:      true,
 				Description:   "VM configuration (CPU/RAM preset) UUID. See the cloudless_vm_configurations data source.",
@@ -157,6 +160,7 @@ func (r *vmResource) Schema(
 						Optional:      true,
 						Description:   "Name of the inline-created boot disk. Defaults to a server-chosen name.",
 						PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+						Validators:    []validator.String{validators.ResourceName()},
 					},
 					"volume_gb": schema.Int64Attribute{
 						Optional:      true,
@@ -264,7 +268,8 @@ func (r *vmResource) Create(
 		}
 	}
 
-	id, ownedIPs, err := r.createDraft(ctx, &plan, bd)
+	draft, err := r.createDraft(ctx, &plan, bd)
+	id, ownedIPs, createdStorages := draft.id, draft.ownedIPs, draft.storages
 	if err != nil {
 		resp.Diagnostics.AddError("Create VM failed", err.Error())
 		return
@@ -290,7 +295,7 @@ func (r *vmResource) Create(
 		} else {
 			// Even the re-read failed: keep the id and the plan's known values
 			// so destroy can still reach the VM.
-			r.fillMinimal(&plan, id, ownedIPs)
+			r.fillMinimal(&plan, id, ownedIPs, createdStorages)
 		}
 		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
@@ -313,7 +318,11 @@ func (r *vmResource) Create(
 		return
 	}
 	if out, err = r.c.GetVM(ctx, id); err != nil {
+		// The VM exists and bills; state must record it even though this read
+		// failed, or the next apply builds a second one and this is orphaned.
 		resp.Diagnostics.AddError("Read VM after create failed", err.Error())
+		r.fillMinimal(&plan, id, ownedIPs, createdStorages)
+		resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 		return
 	}
 
@@ -327,14 +336,22 @@ func (r *vmResource) Create(
 // unallocated, so on any failure before provision it is discarded rather than
 // left for the user to find. Returns the VM ID once provision was accepted
 // (graph @cloudless/fluence, node #1790).
+// draftOutcome is what a created draft leaves the caller holding: its id and
+// the resources the server built for it, which nothing else will clean up.
+type draftOutcome struct {
+	id       string
+	ownedIPs []string
+	storages []string
+}
+
 func (r *vmResource) createDraft(
 	ctx context.Context,
 	plan *vmModel,
 	bd client.DraftBootDisk,
-) (string, []string, error) {
+) (draftOutcome, error) {
 	nics, err := draftInterfaces(plan.NICs)
 	if err != nil {
-		return "", nil, err
+		return draftOutcome{}, err
 	}
 	req := client.VMDraftRequest{
 		ClusterID:       plan.ClusterID.ValueString(),
@@ -357,13 +374,17 @@ func (r *vmResource) createDraft(
 
 	draft, err := r.c.CreateVMDraft(ctx, req)
 	if err != nil {
-		return "", nil, fmt.Errorf("create draft: %w", err)
+		return draftOutcome{}, fmt.Errorf("create draft: %w", err)
 	}
 	id := draft.ID
 	// Public IPs the draft created for itself, named by the receipt; released
 	// on discard because the draft delete's cascade is unobserved
 	// (graph @cloudless/fluence, node #1814) and a leaked address bills.
 	ownedIPs := draft.CreatedResources.PublicIPIDs
+	// The receipt also names the storages the server built for the draft. The
+	// boot disk among them is what Delete needs to clean up, and a VM whose
+	// state had to be salvaged has no other way to learn it.
+	createdStorages := draft.CreatedResources.StorageIDs
 
 	if len(nics) == 0 && len(plan.NICs) > 0 {
 		// The create body could not carry the blocks (see draftInterfaces);
@@ -371,14 +392,14 @@ func (r *vmResource) createDraft(
 		added, aerr := addDraftNICs(ctx, r.c, id, plan.NICs)
 		ownedIPs = append(ownedIPs, added...)
 		if aerr != nil {
-			return "", nil, r.discardDraft(ctx, id, ownedIPs, "assemble network interfaces", aerr)
+			return draftOutcome{}, r.discardDraft(ctx, id, ownedIPs, "assemble network interfaces", aerr)
 		}
 	}
 
 	if _, perr := r.c.ProvisionVM(ctx, id); perr != nil && !r.provisionLanded(ctx, id, perr) {
-		return "", nil, r.discardDraft(ctx, id, ownedIPs, "provision", perr)
+		return draftOutcome{}, r.discardDraft(ctx, id, ownedIPs, "provision", perr)
 	}
-	return id, ownedIPs, nil
+	return draftOutcome{id: id, ownedIPs: ownedIPs, storages: createdStorages}, nil
 }
 
 // discardDraft deletes a draft that failed mid-assembly, plus the public IPs
@@ -712,10 +733,15 @@ func (r *vmResource) ModifyPlan(
 // fillMinimal records a VM whose state could not be read after provision:
 // the id (so destroy can terminate it) with every computed field known but
 // empty. The next refresh replaces it with what the API reports.
-func (r *vmResource) fillMinimal(m *vmModel, id string, ownedIPs []string) {
+func (r *vmResource) fillMinimal(m *vmModel, id string, ownedIPs, createdStorages []string) {
 	m.ID = types.StringValue(id)
 	m.Status = types.StringValue("unknown")
+	// A draft builds exactly one storage of its own, its boot disk; keeping it
+	// is what lets Delete release the volume instead of orphaning it.
 	m.BootDiskID = types.StringNull()
+	if len(createdStorages) == 1 {
+		m.BootDiskID = types.StringValue(createdStorages[0])
+	}
 	m.DataDiskIDs = listFromStrings(nil)
 	m.Subnets = listFromStrings(nil)
 	m.NetworkInterfaces = listFromStrings(nil)
@@ -749,7 +775,13 @@ func (r *vmResource) fillWithNICs(ctx context.Context, m *vmModel, v *client.VM)
 	r.fill(m, v)
 	ifaces, err := r.c.ListVMInterfaces(ctx, v.ID)
 	if err != nil {
+		// Leave nothing unknown behind: a caller that writes state anyway
+		// (the salvage paths in Create) would otherwise hand the framework
+		// unresolved block values and lose the VM entirely.
 		diags.AddError("Read VM network interfaces failed", err.Error())
+		m.NICs = nil
+		m.Subnets = listFromStrings(nil)
+		m.PublicIPID = types.StringNull()
 		return diags
 	}
 	if imported {

@@ -154,3 +154,17 @@ func (s *Server) deletePublicIP(w http.ResponseWriter, id string) {
 	delete(s.publicIPMap, id)
 	s.writeJSON(w, http.StatusOK, wire)
 }
+
+// SeedPublicIP registers a ready address a test can hand to a VM, standing in
+// for one a cloudless_public_ip resource created earlier.
+func (s *Server) SeedPublicIP(id, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.publicIPMap == nil {
+		s.publicIPMap = map[string]*publicIPRecord{}
+	}
+	s.publicIPMap[id] = &publicIPRecord{
+		ID: id, ClusterID: defaultDraftClusterID, Name: name,
+		AddressType: "V4", UserID: "test-user", Status: "ready", Address: "203.0.113.7",
+	}
+}

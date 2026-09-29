@@ -63,13 +63,11 @@ info:
     \ where documented. Responses may be JSON, CSV, or empty, as specified by the\
     \ operation.\n\n- Set `Content-Type: application/json` for POST, PUT, and PATCH\
     \ calls.\n- All examples assume the default `Accept: application/json` header.\n\
-    \n### Example\n\n```bash\ncurl -X POST https://api.fluence.dev/v1/public_ips \\\
-    \n  -H \"Content-Type: application/json\" \\\n  -H \"X-API-KEY: <YOUR_API_KEY>\"\
-    \ \\\n  -d '{\n        \"addressType\": \"V4\",\n        \"clusterId\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\"\
-    ,\n        \"name\": \"my-public-ip\"\n      }'\n```\n\n### HTTP request methods\n\
-    \nThe interface responds to different methods depending on the action required.\n\
-    \n| Method | Description                                                     \
-    \                                   |\n|--------|----------------------------------------------------------------------------------------------------|\n\
+    \n### Example\n\n```bash\ncurl https://api.fluence.dev/v3/clusters \\\n  -H \"\
+    X-API-KEY: <YOUR_API_KEY>\"\n```\n\n### HTTP request methods\n\nThe interface\
+    \ responds to different methods depending on the action required.\n\n| Method\
+    \ | Description                                                              \
+    \                          |\n|--------|----------------------------------------------------------------------------------------------------|\n\
     | GET    | Retrieves resource information. These requests are read-only and won't\
     \ modify any resources.       |\n| POST   | Usually used to create new resources.\
     \ Include all required attributes in the request body as JSON. |\n| PATCH  | Update\
@@ -123,48 +121,34 @@ info:
     n  - echo hello\\n\"\n        }\n      }'\n```\n\nNotes:\n\n- **Create-only.**\
     \ `userData` is meaningful only on `POST /v2/vms`. `PATCH` requests have no `userData`\
     \ field; sending one is dropped during JSON deserialization.\n- **Ephemeral.**\
-    \ The content is stored only until the VM transitions to `Launched` (or `Failed`\
-    \ on create-deadline, or `Terminating`/`Terminated` on termination), then erased\
-    \ in the same transaction as the status change. After that, listing or fetching\
-    \ the VM returns a non-null `cloudInit` object (no fields) as a permanent marker\
-    \ but never the original content.\n- **Length limit.** Maximum 16 KiB enforced\
+    \ The content is stored only until the VM first leaves its initial `New` state,\
+    \ then erased in the same transaction as the status change. After that, listing\
+    \ or fetching the VM returns a non-null `cloudInit` object (no fields) as a permanent\
+    \ marker but never the original content.\n- **Length limit.** Maximum 16 KiB enforced\
     \ as a **byte count** (UTF-8 multi-byte characters are counted by their byte size,\
     \ not code-point count). Oversize requests are rejected with `400 Bad Request`.\n\
     - **Privacy.** The content is never echoed back through any API endpoint. Avoid\
     \ logging database bind values or capturing request bodies in external middleware.\n\
     - **Backend rejection.** Malformed userData (e.g. invalid YAML) is detected by\
     \ the VM backend during provisioning and surfaces as a `Failed` VM status, not\
-    \ a synchronous `400`.\n\n### Operator notes\n\n- The side-table `crd.user_virtual_machine_cloud_init`\
-    \ keeps a row per VM that ever had cloud-init. After successful handoff to the\
-    \ VM backend (status `Launching` or `Launched`) — or upon terminal cleanup (`Failed`\
-    \ from create-deadline timeout, or `Terminating`/`Terminated` from termination)\
-    \ — the row's `user_data` column is set to `NULL` in the same transaction as the\
-    \ status change. The row itself stays as a permanent \"had cloud-init\" marker\
-    \ — its existence is the source of truth for the non-null `cloudInit` object on\
-    \ the response.\n- WAL/audit logs and `pg_dump` backups can preserve the **pre-wipe**\
-    \ state (raw `user_data` bytes) until they roll over. Treat these artefacts as\
-    \ carrying potentially-sensitive material; restrict access and retention accordingly.\n\
-    - The HTTP logger records request/response metadata, not bodies; header values\
-    \ are redacted. Preserve this boundary when adding middleware.\n- Do not set `RUST_LOG=sqlx=debug`\
-    \ in production — sqlx debug logs can include bind values, which would expose\
-    \ `userData` for in-flight queries.\n\n## Public v3 recovery after an uncertain\
-    \ result\n\nAn accepted command, the latest resource state and completion in the\
-    \ compute backend are different observations. A timeout, lost response or client\
-    \ restart does not roll back a request. A later `4xx` response does not prove\
-    \ that the first attempt failed: the first attempt may have changed the state\
-    \ against which the retry is validated.\n\nBefore sending a command, durably save\
-    \ its environment, account, target IDs and recovery metadata. For receipt-backed\
-    \ commands, save the request key and original input securely. Save returned resource\
-    \ IDs and receipts as soon as they arrive, so recovery can resume after a client\
-    \ restart. Poll using the same account and environment; do not replace an uncertain\
-    \ create with another create merely because the first ID was lost.\n\n### VM create\
-    \ and terminate receipts\n\nThe VM receipt contract applies to `POST /v3/vms`\
-    \ and `POST /v3/vms/{vm_id}/terminate`. Reuse the original `Idempotency-Key` and\
-    \ input after an uncertain result. Changing the key starts a different logical\
-    \ command. Receipt replay is not an API-wide property of POST, and sending this\
-    \ header to another operation does not by itself make that operation replayable.\
-    \ Consult that operation's contract before retrying.\n\n- VM create returns the\
-    \ originally accepted draft and resource IDs, even after subsequent edits or provisioning.\
+    \ a synchronous `400`.\n\n## Public v3 recovery after an uncertain result\n\n\
+    An accepted command, the latest resource state and completion in the compute backend\
+    \ are different observations. A timeout, lost response or client restart does\
+    \ not roll back a request. A later `4xx` response does not prove that the first\
+    \ attempt failed: the first attempt may have changed the state against which the\
+    \ retry is validated.\n\nBefore sending a command, durably save its environment,\
+    \ account, target IDs and recovery metadata. For receipt-backed commands, save\
+    \ the request key and original input securely. Save returned resource IDs and\
+    \ receipts as soon as they arrive, so recovery can resume after a client restart.\
+    \ Poll using the same account and environment; do not replace an uncertain create\
+    \ with another create merely because the first ID was lost.\n\n### VM create and\
+    \ terminate receipts\n\nThe VM receipt contract applies to `POST /v3/vms` and\
+    \ `POST /v3/vms/{vm_id}/terminate`. Reuse the original `Idempotency-Key` and input\
+    \ after an uncertain result. Changing the key starts a different logical command.\
+    \ Receipt replay is not an API-wide property of POST, and sending this header\
+    \ to another operation does not by itself make that operation replayable. Consult\
+    \ that operation's contract before retrying.\n\n- VM create returns the originally\
+    \ accepted draft and resource IDs, even after subsequent edits or provisioning.\
     \ Different input under the same key conflicts; if the accepted VM was deleted,\
     \ create replay returns `410 Gone`.\n- VM terminate returns the original retained\
     \ storage/IP inventory. Preserve it: a new terminate key cannot reconstruct the\
@@ -275,12 +259,13 @@ info:
   license:
     name: AGPL-3
     identifier: AGPL-3
-  version: 0.14.0
+  version: 0.15.1
 paths:
   /api_keys:
     get:
       tags:
       - API keys
+      summary: List API keys (legacy)
       operationId: List API keys
       responses:
         '200':
@@ -290,7 +275,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ApiKeyInfoDto'
+                  $ref: '#/components/schemas/LegacyApiKeyInfoDto'
         '400':
           description: Bad Request
           content:
@@ -325,9 +310,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -354,6 +338,7 @@ paths:
     post:
       tags:
       - API keys
+      summary: Create API key (legacy)
       operationId: Create API key
       requestBody:
         description: Create API key
@@ -363,14 +348,12 @@ paths:
               $ref: '#/components/schemas/NewApiKeyDto'
         required: true
       responses:
-        '200':
+        '201':
           description: API Key created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiKeyDto'
-              example:
-                apiKey: 1234-5678-8901-2345
+                $ref: '#/components/schemas/LegacyApiKeyDto'
         '400':
           description: Bad Request
           content:
@@ -405,9 +388,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -434,6 +416,7 @@ paths:
     delete:
       tags:
       - API keys
+      summary: Remove API key (legacy)
       operationId: Remove API key
       requestBody:
         description: Remove API Key by API Key or by hash
@@ -479,9 +462,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -505,87 +487,11 @@ paths:
       - access_jwt_token: []
       - api_key:
         - api_key:remove
-  /auth/refresh:
-    post:
-      tags:
-      - Auth
-      operationId: Refresh access token
-      requestBody:
-        description: Create new access token by refresh token
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RefreshTokenRequest'
-            example:
-              refresh_token: some-token
-        required: true
-      responses:
-        '200':
-          description: Token created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RefreshTokenResponse'
-        '400':
-          description: Bad Request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorBody'
-              example:
-                code: bad_request
-                error: Wrong parameters
-        '401':
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorBody'
-              example:
-                code: unauthorized
-                error: Auth token invalid or missing
-        '403':
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorBody'
-              example:
-                code: forbidden
-                error: Not allowed to call this endpoint
-        '409':
-          description: Conflict
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorBody'
-              example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
-        '422':
-          description: Unprocessable Entity
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorBody'
-              example:
-                code: unprocessable_entity
-                error: Unable to process the entity
-        '500':
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorBody'
-              example:
-                code: internal_server_error
-                error: Unexpected server error
-      security: []
   /v1/api_keys:
     get:
       tags:
       - API keys
+      summary: List API keys
       operationId: list_api_keys
       responses:
         '200':
@@ -628,9 +534,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -656,6 +561,7 @@ paths:
     post:
       tags:
       - API keys
+      summary: Create API key
       operationId: create_api_key
       requestBody:
         description: Create API key
@@ -672,7 +578,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiKeyDto'
               example:
-                apiKey: 1234-5678-8901-2345
+                createdAt: '2026-09-01T00:00:00Z'
+                expiresAt: '2027-09-01T00:00:00Z'
+                id: 00000000-0000-4000-8000-000000000001
+                lastUsedAt: '2026-09-01T00:00:00Z'
+                name: Example key
+                scopes:
+                - api_key:list
+                value: example-key
         '400':
           description: Bad Request
           content:
@@ -707,9 +620,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -736,6 +648,7 @@ paths:
     delete:
       tags:
       - API keys
+      summary: Remove API key
       operationId: remove_api_key
       parameters:
       - name: api_key_id
@@ -746,12 +659,15 @@ paths:
           type: string
           format: uuid
       requestBody:
-        description: Remove API Key by id
+        description: Optional legacy payload for existing clients. Ignored by the
+          server; the ID in the path selects the key. New clients should omit the
+          body.
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeleteApiKeyRequest'
-        required: true
+              oneOf:
+              - type: 'null'
+              - $ref: '#/components/schemas/DeleteApiKeyRequest'
       responses:
         '200':
           description: API Key removed
@@ -789,9 +705,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -818,6 +733,7 @@ paths:
     get:
       tags:
       - Billing
+      summary: Get aggregated charges
       description: Aggregated charges over a date range. `startDate` is inclusive,
         `endDate` is inclusive (charges through the end of the `endDate` day are included).
         Optional `groupBy`/`period` control the aggregation dimension and time bucket;
@@ -916,9 +832,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -945,6 +860,7 @@ paths:
     get:
       tags:
       - Billing
+      summary: Get total charges
       operationId: get_total_charges
       parameters:
       - name: resourceId
@@ -1010,9 +926,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1039,6 +954,7 @@ paths:
     get:
       tags:
       - Billing
+      summary: Get top-up history (v1)
       operationId: get_top_up_history
       responses:
         '200':
@@ -1083,9 +999,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1113,6 +1028,7 @@ paths:
     post:
       tags:
       - Billing
+      summary: Create top-up request
       operationId: Create top-up request
       requestBody:
         description: Create a new top-up request
@@ -1162,9 +1078,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1191,6 +1106,7 @@ paths:
     get:
       tags:
       - Billing
+      summary: Get pending top-up (v1)
       operationId: Get pending top-up
       responses:
         '200':
@@ -1233,9 +1149,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1262,6 +1177,7 @@ paths:
     get:
       tags:
       - Hardware
+      summary: Get available clusters
       operationId: Get available clusters
       responses:
         '200':
@@ -1304,9 +1220,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1334,6 +1249,7 @@ paths:
     get:
       tags:
       - Hardware
+      summary: Get bulk resources
       description: Returns available resources keyed by cluster. Per-cluster failures
         are skipped (partial results, not a hard error). The all-clusters path (no
         `clusterIds`) is capped at 100 clusters.
@@ -1391,9 +1307,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1421,6 +1336,7 @@ paths:
     get:
       tags:
       - Hardware
+      summary: Get available resources
       operationId: get_available_resources
       parameters:
       - name: cluster_id
@@ -1470,9 +1386,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1500,29 +1415,13 @@ paths:
     get:
       tags:
       - Hardware
-      summary: 'Raw, unfiltered catalog of *all* VM configurations (every row in
+      summary: List VM configurations
+      description: 'Returns the full VM configuration catalog, including configurations
+        without a price. Results are not filtered by cluster or availability for purchase.
+        Use this catalog to look up configurations of existing VMs.
 
-        `crd.vm_configurations`, including unpriced SKUs such as `cpu-shared-*`
 
-        before Phase 2 pricing lands). This is intentionally **not** a
-
-        "what can I buy here" listing: it has no price-gate, no per-cluster
-
-        `cpu_allocation_ratio`, and no cluster scope. It backs admin/internal
-
-        tooling that needs the full catalog (e.g. assigning prices to a SKU that
-
-        has none yet) and id->detail lookups for already-created VMs.'
-      description: 'The customer-facing, buyable listing — price-gated and ratio-gated
-        per
-
-        cluster — is `GET /v1/clusters/{cluster_id}/resources`
-
-        (`api::hardware::resources::get_available_resources`). Do not treat this
-
-        endpoint as a plan picker; selecting an unpriced SKU here would 404 on
-
-        `POST /v2/vms`.'
+        To find configurations available for purchase in a cluster, use `GET /v1/clusters/{cluster_id}/resources`.'
       operationId: get_vm_configurations
       responses:
         '200':
@@ -1565,9 +1464,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1595,6 +1493,7 @@ paths:
     get:
       tags:
       - Hardware
+      summary: Get datacenters
       description: Get a list of datacenters
       operationId: get_datacenters
       responses:
@@ -1643,9 +1542,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1673,6 +1571,7 @@ paths:
     get:
       tags:
       - Internal
+      summary: Get JWT verification keys
       operationId: get_jwks
       responses:
         '200':
@@ -1686,6 +1585,7 @@ paths:
     post:
       tags:
       - Prices
+      summary: Estimate resource cost
       operationId: cost
       requestBody:
         description: Resources to calculate cost
@@ -1735,9 +1635,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1765,6 +1664,7 @@ paths:
     get:
       tags:
       - Prices
+      summary: Get public IP prices
       operationId: get_public_ip_prices
       parameters:
       - name: clusterId
@@ -1813,9 +1713,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1843,6 +1742,7 @@ paths:
     get:
       tags:
       - Prices
+      summary: Get storage prices
       operationId: get_storage_prices
       parameters:
       - name: clusterId
@@ -1891,9 +1791,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1921,6 +1820,7 @@ paths:
     get:
       tags:
       - Prices
+      summary: Get VM prices
       operationId: get_vm_prices
       parameters:
       - name: clusterId
@@ -1969,9 +1869,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -1999,6 +1898,7 @@ paths:
     get:
       tags:
       - Promo codes
+      summary: Preview promo code
       operationId: preview_promo_code
       parameters:
       - name: code
@@ -2054,9 +1954,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -2080,6 +1979,7 @@ paths:
     get:
       tags:
       - PublicIP
+      summary: Get public IPs
       operationId: get_users_public_ips
       parameters:
       - name: ids
@@ -2230,9 +2130,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -2259,6 +2158,7 @@ paths:
     post:
       tags:
       - PublicIP
+      summary: Create public IP
       operationId: create_users_public_ip
       requestBody:
         description: Create a new user public IP
@@ -2315,9 +2215,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -2345,6 +2244,7 @@ paths:
     post:
       tags:
       - PublicIP
+      summary: Delete public IPs
       operationId: delete_users_public_ips
       requestBody:
         description: Public IPs ids to remove
@@ -2396,9 +2296,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -2426,6 +2325,7 @@ paths:
     delete:
       tags:
       - PublicIP
+      summary: Delete public IP
       operationId: delete_users_public_ip
       parameters:
       - name: public_ip_id
@@ -2482,9 +2382,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -2511,6 +2410,7 @@ paths:
     patch:
       tags:
       - PublicIP
+      summary: Update public IP
       operationId: update_user_public_ip
       parameters:
       - name: public_ip_id
@@ -2568,9 +2468,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -2598,6 +2497,7 @@ paths:
     get:
       tags:
       - SecurityGroup
+      summary: Get security groups
       operationId: get_user_security_groups
       parameters:
       - name: ids
@@ -2688,9 +2588,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -2717,6 +2616,7 @@ paths:
     post:
       tags:
       - SecurityGroup
+      summary: Create security group
       operationId: create_user_security_group
       requestBody:
         description: Create a new user security group
@@ -2796,6 +2696,7 @@ paths:
     post:
       tags:
       - SecurityGroup
+      summary: Delete security groups
       operationId: delete_user_security_groups
       requestBody:
         description: Security group IDs to remove
@@ -2847,9 +2748,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -2877,6 +2777,7 @@ paths:
     delete:
       tags:
       - SecurityGroup
+      summary: Delete security group
       operationId: delete_user_security_group
       parameters:
       - name: security_group_id
@@ -2927,9 +2828,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -2956,6 +2856,7 @@ paths:
     patch:
       tags:
       - SecurityGroup
+      summary: Update security group
       operationId: update_user_security_group
       parameters:
       - name: security_group_id
@@ -3013,9 +2914,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -3043,6 +2943,7 @@ paths:
     get:
       tags:
       - Service
+      summary: Get service status
       operationId: get_service_status
       responses:
         '200':
@@ -3085,9 +2986,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -3111,6 +3011,7 @@ paths:
     get:
       tags:
       - SSH keys
+      summary: Get SSH keys
       operationId: get_users_ssh_keys
       parameters:
       - name: ids
@@ -3181,9 +3082,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -3208,6 +3108,7 @@ paths:
     post:
       tags:
       - SSH keys
+      summary: Create SSH key
       operationId: create_users_ssh_key
       requestBody:
         description: Create a new user Ssh key
@@ -3257,9 +3158,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -3285,6 +3185,7 @@ paths:
     post:
       tags:
       - SSH keys
+      summary: Delete SSH keys
       operationId: delete_users_ssh_keys
       requestBody:
         description: Ssh keys ids to remove
@@ -3336,9 +3237,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -3364,6 +3264,7 @@ paths:
     delete:
       tags:
       - SSH keys
+      summary: Delete SSH key
       operationId: delete_users_ssh_key
       parameters:
       - name: ssh_key_id
@@ -3414,9 +3315,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -3442,6 +3342,7 @@ paths:
     get:
       tags:
       - Storage
+      summary: Get storages
       operationId: get_users_storages
       parameters:
       - name: ids
@@ -3570,9 +3471,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -3599,6 +3499,7 @@ paths:
     post:
       tags:
       - Storage
+      summary: Create storage
       operationId: create_users_storage
       requestBody:
         description: Create a new user storage
@@ -3655,9 +3556,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -3685,6 +3585,7 @@ paths:
     get:
       tags:
       - Storage
+      summary: Get default images
       operationId: get_default_images
       responses:
         '200':
@@ -3697,6 +3598,7 @@ paths:
     post:
       tags:
       - Storage
+      summary: Delete storages
       operationId: delete_users_storages
       requestBody:
         description: Storages ids to remove
@@ -3748,9 +3650,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -3778,6 +3679,7 @@ paths:
     get:
       tags:
       - Storage
+      summary: Get storage types
       operationId: get_storage_types
       responses:
         '200':
@@ -3820,9 +3722,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -3850,6 +3751,7 @@ paths:
     get:
       tags:
       - Storage
+      summary: Get storage
       operationId: get_users_storage
       parameters:
       - name: storage_id
@@ -3900,9 +3802,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -3929,6 +3830,7 @@ paths:
     delete:
       tags:
       - Storage
+      summary: Delete storage
       operationId: delete_users_storage
       parameters:
       - name: storage_id
@@ -3985,9 +3887,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4014,6 +3915,7 @@ paths:
     patch:
       tags:
       - Storage
+      summary: Update storage
       operationId: update_users_storage
       parameters:
       - name: storage_id
@@ -4078,9 +3980,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4108,6 +4009,7 @@ paths:
     get:
       tags:
       - Subnets
+      summary: Get subnets
       operationId: get_users_subnets
       parameters:
       - name: ids
@@ -4193,9 +4095,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4223,6 +4124,7 @@ paths:
     post:
       tags:
       - Subnets
+      summary: Delete subnets
       operationId: delete_users_subnets
       requestBody:
         description: Subnets ids to remove
@@ -4274,9 +4176,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4304,6 +4205,7 @@ paths:
     delete:
       tags:
       - Subnets
+      summary: Delete subnet
       operationId: delete_users_subnet
       parameters:
       - name: subnet_id
@@ -4354,9 +4256,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4383,6 +4284,7 @@ paths:
     patch:
       tags:
       - Subnets
+      summary: Update subnet
       operationId: update_user_subnet
       parameters:
       - name: subnet_id
@@ -4446,9 +4348,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4482,6 +4383,7 @@ paths:
     post:
       tags:
       - Subnets
+      summary: Set default subnet
       operationId: set_default_users_subnet
       parameters:
       - name: subnet_id
@@ -4564,6 +4466,7 @@ paths:
     post:
       tags:
       - Users
+      summary: Refresh balance
       operationId: refresh_user_balance
       responses:
         '200':
@@ -4606,9 +4509,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4629,12 +4531,12 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token: []
-      - api_key:
-        - ''
+      - api_key: []
   /v1/users/me:
     get:
       tags:
       - Users
+      summary: Get current user info
       operationId: Get current user info
       responses:
         '200':
@@ -4677,9 +4579,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4700,12 +4601,12 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token: []
-      - api_key:
-        - ''
+      - api_key: []
   /v1/users/me/profile:
     get:
       tags:
       - Users
+      summary: Get current user profile
       operationId: Get current user profile
       responses:
         '200':
@@ -4748,9 +4649,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4771,11 +4671,11 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token: []
-      - api_key:
-        - ''
+      - api_key: []
     patch:
       tags:
       - Users
+      summary: Update current user profile
       operationId: Update current user profile
       requestBody:
         description: Patch current user profile
@@ -4830,9 +4730,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4853,12 +4752,12 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token: []
-      - api_key:
-        - ''
+      - api_key: []
   /v1/users/me/profile/acknowledge:
     post:
       tags:
       - Users
+      summary: Acknowledge current user profile prompt
       operationId: Acknowledge current user profile prompt
       responses:
         '200':
@@ -4901,9 +4800,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4924,12 +4822,12 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token: []
-      - api_key:
-        - ''
+      - api_key: []
   /v1/users/me/request-access:
     post:
       tags:
       - Users
+      summary: Set access requested for current user
       operationId: Set access requested for current user
       responses:
         '200':
@@ -4972,9 +4870,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -4995,12 +4892,12 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token: []
-      - api_key:
-        - ''
+      - api_key: []
   /v1/users/promo_codes/redeem:
     post:
       tags:
       - Promo codes
+      summary: Redeem promo code
       operationId: redeem_promo_code
       requestBody:
         description: Redeem promo code
@@ -5050,9 +4947,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -5073,12 +4969,12 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token: []
-      - api_key:
-        - ''
+      - api_key: []
   /v1/vpcs:
     get:
       tags:
       - VPCs
+      summary: Get VPCs
       operationId: get_users_vpcs
       parameters:
       - name: ids
@@ -5164,9 +5060,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -5193,6 +5088,7 @@ paths:
     post:
       tags:
       - VPCs
+      summary: Create VPC
       operationId: create_users_vpc
       requestBody:
         description: Create a new user VPC
@@ -5242,9 +5138,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -5272,6 +5167,7 @@ paths:
     post:
       tags:
       - VPCs
+      summary: Delete VPCs
       operationId: delete_users_vpcs
       requestBody:
         description: VPCs ids to remove
@@ -5350,6 +5246,7 @@ paths:
     delete:
       tags:
       - VPCs
+      summary: Delete VPC
       operationId: delete_users_vpc
       parameters:
       - name: vpc_id
@@ -5425,6 +5322,7 @@ paths:
     patch:
       tags:
       - VPCs
+      summary: Update VPC
       operationId: update_user_vpc
       parameters:
       - name: vpc_id
@@ -5482,9 +5380,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -5512,6 +5409,7 @@ paths:
     post:
       tags:
       - Subnets
+      summary: Create subnet
       operationId: create_users_subnet
       parameters:
       - name: vpc_id
@@ -5612,6 +5510,7 @@ paths:
     get:
       tags:
       - Billing
+      summary: Get top-up history (v2)
       operationId: get_top_up_history_v2
       parameters:
       - name: start
@@ -5714,9 +5613,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -5743,6 +5641,7 @@ paths:
     get:
       tags:
       - Billing
+      summary: Discover payment methods
       operationId: discover_payment_methods_v2
       responses:
         '200':
@@ -5787,9 +5686,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -5816,6 +5714,7 @@ paths:
     get:
       tags:
       - Billing
+      summary: List top ups
       operationId: list_top_ups_v2
       parameters:
       - name: start
@@ -5901,9 +5800,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -5929,6 +5827,7 @@ paths:
     post:
       tags:
       - Billing
+      summary: Create top up
       operationId: create_top_up_v2
       requestBody:
         description: Create a new top-up intent against a payment provider
@@ -5978,9 +5877,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -6013,6 +5911,7 @@ paths:
     get:
       tags:
       - Billing
+      summary: Get pending top-up (v2)
       operationId: get_pending_top_up_v2
       responses:
         '200':
@@ -6055,9 +5954,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -6084,6 +5982,7 @@ paths:
     delete:
       tags:
       - Billing
+      summary: Cancel top up
       operationId: cancel_top_up_v2
       parameters:
       - name: intent_id
@@ -6135,9 +6034,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -6164,6 +6062,7 @@ paths:
     get:
       tags:
       - Users
+      summary: Get balance
       operationId: get_user_balance_v2
       parameters:
       - name: entitlementKey
@@ -6220,9 +6119,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -6243,12 +6141,12 @@ paths:
                 error: Unexpected server error
       security:
       - access_jwt_token: []
-      - api_key:
-        - ''
+      - api_key: []
   /v2/vms:
     get:
       tags:
       - VMs
+      summary: Get VMs
       operationId: get_users_vms
       parameters:
       - name: ids
@@ -6383,9 +6281,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -6412,6 +6309,7 @@ paths:
     post:
       tags:
       - VMs
+      summary: Create VM
       operationId: create_users_vm
       requestBody:
         description: Create a new user VM
@@ -6475,9 +6373,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -6505,6 +6402,7 @@ paths:
     get:
       tags:
       - VMs
+      summary: Get VM
       operationId: get_users_vm
       parameters:
       - name: vm_id
@@ -6566,9 +6464,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -6595,6 +6492,7 @@ paths:
     patch:
       tags:
       - VMs
+      summary: Update VM
       operationId: update_users_vm
       parameters:
       - name: vm_id
@@ -6652,9 +6550,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -6682,6 +6579,7 @@ paths:
     get:
       tags:
       - VMs
+      summary: Get VM interfaces
       operationId: get_vm_interfaces
       parameters:
       - name: vm_id
@@ -6734,9 +6632,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -6764,6 +6661,7 @@ paths:
     patch:
       tags:
       - VMs
+      summary: Update network interface
       operationId: update_network_interface
       parameters:
       - name: vm_id
@@ -6828,9 +6726,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -6858,6 +6755,7 @@ paths:
     post:
       tags:
       - VMs
+      summary: Add public IP
       operationId: add_public_ip
       parameters:
       - name: vm_id
@@ -6953,6 +6851,7 @@ paths:
     post:
       tags:
       - VMs
+      summary: Remove public IP
       operationId: remove_public_ip
       parameters:
       - name: vm_id
@@ -7003,9 +6902,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -7033,6 +6931,7 @@ paths:
     post:
       tags:
       - VMs
+      summary: Restart VM
       operationId: restart_users_vm
       parameters:
       - name: vm_id
@@ -7089,9 +6988,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -7119,6 +7017,7 @@ paths:
     post:
       tags:
       - VMs
+      summary: Soft reboot VM
       operationId: softreboot_users_vm
       parameters:
       - name: vm_id
@@ -7175,9 +7074,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -7205,6 +7103,7 @@ paths:
     post:
       tags:
       - VMs
+      summary: Add storages
       operationId: add_storages
       parameters:
       - name: vm_id
@@ -7274,9 +7173,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -7304,6 +7202,7 @@ paths:
     post:
       tags:
       - VMs
+      summary: Remove storages
       operationId: remove_storages
       parameters:
       - name: vm_id
@@ -7367,9 +7266,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -7397,6 +7295,7 @@ paths:
     post:
       tags:
       - VMs
+      summary: Terminate VM
       operationId: terminate_users_vm
       parameters:
       - name: vm_id
@@ -7453,9 +7352,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -7483,6 +7381,7 @@ paths:
     post:
       tags:
       - VMs
+      summary: Mint VM access token
       operationId: mint_vm_access_token
       parameters:
       - name: vm_id
@@ -7540,9 +7439,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
               example:
-                code: default_topology_unusable
-                error: 'the default network is not usable: the default VPC is unhealthy;
-                  delete the default VPC and retry'
+                code: conflict
+                error: The request conflicts with the current resource state
         '422':
           description: Unprocessable Entity
           content:
@@ -8107,7 +8005,7 @@ paths:
     get:
       tags:
       - API keys
-      summary: List api keys
+      summary: List API keys
       operationId: public_v3_list_api_keys
       responses:
         '200':
@@ -8179,7 +8077,7 @@ paths:
     post:
       tags:
       - API keys
-      summary: Create api key
+      summary: Create API key
       description: Issue an API key with a subset of the caller's permitted scopes
         and a future expiresAt. The credential value is returned only on creation;
         save it securely. Listing keys never reveals the credential.
@@ -8268,7 +8166,7 @@ paths:
     delete:
       tags:
       - API keys
-      summary: Remove api key
+      summary: Remove API key
       operationId: public_v3_remove_api_key
       parameters:
       - name: api_key_id
@@ -8884,7 +8782,7 @@ paths:
     post:
       tags:
       - Prices
-      summary: Cost
+      summary: Estimate resource cost
       operationId: public_v3_cost
       requestBody:
         content:
@@ -8970,7 +8868,7 @@ paths:
     get:
       tags:
       - Prices
-      summary: Public ip prices
+      summary: Public IP prices
       operationId: public_v3_public_ip_prices
       parameters:
       - name: clusterId
@@ -9182,7 +9080,7 @@ paths:
     get:
       tags:
       - Prices
-      summary: Vm prices
+      summary: VM prices
       operationId: public_v3_vm_prices
       parameters:
       - name: clusterId
@@ -9449,7 +9347,7 @@ paths:
     get:
       tags:
       - Public IP
-      summary: List public ips
+      summary: List public IPs
       operationId: public_v3_list_public_ips
       parameters:
       - name: ids
@@ -9603,7 +9501,7 @@ paths:
     post:
       tags:
       - Public IP
-      summary: Create public ip
+      summary: Create public IP
       operationId: public_v3_create_public_ip
       parameters:
       - name: Idempotency-Key
@@ -9715,7 +9613,7 @@ paths:
     delete:
       tags:
       - Public IP
-      summary: Delete public ip
+      summary: Delete public IP
       operationId: public_v3_delete_public_ip
       parameters:
       - name: public_ip_id
@@ -9793,7 +9691,7 @@ paths:
     patch:
       tags:
       - Public IP
-      summary: Update public ip
+      summary: Update public IP
       operationId: public_v3_update_public_ip
       parameters:
       - name: public_ip_id
@@ -10358,7 +10256,7 @@ paths:
     get:
       tags:
       - SSH keys
-      summary: List ssh keys
+      summary: List SSH keys
       operationId: public_v3_list_ssh_keys
       parameters:
       - name: ids
@@ -10458,7 +10356,7 @@ paths:
     post:
       tags:
       - SSH keys
-      summary: Create ssh key
+      summary: Create SSH key
       operationId: public_v3_create_ssh_key
       requestBody:
         content:
@@ -10544,7 +10442,7 @@ paths:
     delete:
       tags:
       - SSH keys
-      summary: Delete ssh key
+      summary: Delete SSH key
       operationId: public_v3_delete_ssh_key
       parameters:
       - name: ssh_key_id
@@ -11994,7 +11892,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Estimate vm
+      summary: Estimate VM
       description: Estimate a complete explicit specification without creating resources.
         hourlyTotal is the total hourly USD cost; hourlyIncremental excludes existing
         resources already billed separately. Values are decimal strings. Advisory
@@ -12102,7 +12000,7 @@ paths:
     get:
       tags:
       - VMs
-      summary: List vms
+      summary: List VMs
       operationId: public_v3_list_vms
       parameters:
       - name: ids
@@ -12204,7 +12102,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Create vm
+      summary: Create VM draft
       description: 'Create a Draft, not a running VM. Omit the body or send {} to
         use platform defaults; null is invalid. Omitted interfaces selects an automatic
         interface; [] requests none. Idempotency-Key identifies one logical create:
@@ -12371,7 +12269,7 @@ paths:
     get:
       tags:
       - VMs
-      summary: Get vm
+      summary: Get VM
       operationId: public_v3_get_vm
       parameters:
       - name: vm_id
@@ -12437,7 +12335,7 @@ paths:
     delete:
       tags:
       - VMs
-      summary: Discard vm
+      summary: Discard VM draft
       description: Discard a Draft and perform draft cleanup. This is not termination
         of a live VM. Returns 204 without a body. Use POST terminate for provisioned
         VMs.
@@ -12508,7 +12406,7 @@ paths:
     patch:
       tags:
       - VMs
-      summary: Update vm
+      summary: Update VM
       description: Change a draft's name or configuration. Configuration is immutable
         after provisioning; renaming follows the existing VM state rules. An empty
         object is rejected with field `$`, reason `empty_patch`.
@@ -12599,7 +12497,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Replace vm boot disk
+      summary: Replace VM boot disk
       operationId: public_v3_replace_vm_boot_disk
       parameters:
       - name: vm_id
@@ -12718,7 +12616,7 @@ paths:
     put:
       tags:
       - VMs
-      summary: Set vm cloud init
+      summary: Set VM cloud init
       description: Set draft cloud-init user data. Nonempty UTF-8 text, at most 16384
         bytes. VM reads never return the content. Invalid YAML can fail asynchronously
         at the VM backend; this endpoint does not interpret cloud-init YAML.
@@ -12812,7 +12710,7 @@ paths:
     delete:
       tags:
       - VMs
-      summary: Clear vm cloud init
+      summary: Clear VM cloud init
       operationId: public_v3_clear_vm_cloud_init
       parameters:
       - name: vm_id
@@ -12891,7 +12789,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Move vm cluster
+      summary: Move VM cluster
       description: Move a draft to another cluster using expectedUpdatedAt for concurrency
         protection. Cluster-bound selections can become invalid; inspect and complete
         the draft again before provisioning.
@@ -12986,7 +12884,7 @@ paths:
     get:
       tags:
       - VMs
-      summary: Estimate saved vm
+      summary: Estimate saved VM
       description: Estimate the saved draft without modifying it. Requires both vms:read
         and prices:read. hourlyTotal includes existing resources; hourlyIncremental
         counts newly billable resources. Values are hourly USD decimal strings. Provisioning
@@ -13071,7 +12969,7 @@ paths:
     get:
       tags:
       - VMs
-      summary: List vm interfaces
+      summary: List VM interfaces
       operationId: public_v3_list_vm_interfaces
       parameters:
       - name: vm_id
@@ -13149,7 +13047,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Add vm interface
+      summary: Add VM interface
       operationId: public_v3_add_vm_interface
       parameters:
       - name: vm_id
@@ -13243,7 +13141,7 @@ paths:
     delete:
       tags:
       - VMs
-      summary: Remove vm interface
+      summary: Remove VM interface
       operationId: public_v3_remove_vm_interface
       parameters:
       - name: vm_id
@@ -13322,7 +13220,7 @@ paths:
     patch:
       tags:
       - VMs
-      summary: Update vm interface
+      summary: Update VM interface
       description: 'Send exactly one patch kind: repoint subnet, convert kind, or
         configure. staticIps cannot be combined with a non-null securityGroupId; combining
         staticIps with securityGroupId:null is allowed. An empty patch is invalid.
@@ -13424,7 +13322,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Set default vm interface
+      summary: Set default VM interface
       operationId: public_v3_set_default_vm_interface
       parameters:
       - name: vm_id
@@ -13508,7 +13406,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Provision vm
+      summary: Provision VM draft
       description: 'Validate and provision the saved draft. Admission is checked again;
         an estimate does not reserve capacity or balance. This command is not receipt-replayed:
         after a lost response, inspect the VM state before retrying. A successful
@@ -13591,7 +13489,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Restart vm
+      summary: Restart VM
       description: Request an asynchronous VM state transition. Inspect the VM to
         observe completion; this command has no idempotency receipt.
       operationId: public_v3_restart_vm
@@ -13667,7 +13565,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Soft reboot vm
+      summary: Soft reboot VM
       description: Request an asynchronous VM state transition. Inspect the VM to
         observe completion; this command has no idempotency receipt.
       operationId: public_v3_soft_reboot_vm
@@ -13743,7 +13641,7 @@ paths:
     put:
       tags:
       - VMs
-      summary: Replace vm ssh keys
+      summary: Replace VM SSH keys
       operationId: public_v3_replace_vm_ssh_keys
       parameters:
       - name: vm_id
@@ -13835,7 +13733,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Add vm storage
+      summary: Add VM storage
       operationId: public_v3_add_vm_storage
       parameters:
       - name: vm_id
@@ -13953,7 +13851,7 @@ paths:
     delete:
       tags:
       - VMs
-      summary: Remove vm storage
+      summary: Remove VM storage
       operationId: public_v3_remove_vm_storage
       parameters:
       - name: vm_id
@@ -14032,7 +13930,7 @@ paths:
     patch:
       tags:
       - VMs
-      summary: Update vm storage
+      summary: Update VM storage
       operationId: public_v3_update_vm_storage
       parameters:
       - name: vm_id
@@ -14130,7 +14028,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Terminate vm
+      summary: Terminate VM
       description: 'Accept termination and return the original inventory of retained
         disks and public IPs. Those resources are not deleted: inspect and delete
         them separately when no longer needed to avoid ongoing charges. Retry with
@@ -14221,7 +14119,7 @@ paths:
     post:
       tags:
       - VMs
-      summary: Vm access token
+      summary: VM access token
       operationId: public_v3_vm_access_token
       parameters:
       - name: vm_id
@@ -14300,7 +14198,7 @@ paths:
     get:
       tags:
       - VPCs
-      summary: List vpcs
+      summary: List VPCs
       operationId: public_v3_list_vpcs
       parameters:
       - name: ids
@@ -14415,7 +14313,7 @@ paths:
     post:
       tags:
       - VPCs
-      summary: Create vpc
+      summary: Create VPC
       operationId: public_v3_create_vpc
       parameters:
       - name: Idempotency-Key
@@ -14527,7 +14425,7 @@ paths:
     delete:
       tags:
       - VPCs
-      summary: Delete vpc
+      summary: Delete VPC
       operationId: public_v3_delete_vpc
       parameters:
       - name: vpc_id
@@ -14605,7 +14503,7 @@ paths:
     patch:
       tags:
       - VPCs
-      summary: Update vpc
+      summary: Update VPC
       operationId: public_v3_update_vpc
       parameters:
       - name: vpc_id
@@ -14892,15 +14790,15 @@ components:
       properties:
         createdAt:
           type: string
-          example: '2025-01-01T00:00:00.000Z'
+          example: '2026-09-01T00:00:00.000Z'
         expiresAt:
           type: string
-          example: '2025-01-01T00:00:00.000Z'
+          example: '2027-09-01T00:00:00.000Z'
         id:
           $ref: '#/components/schemas/ApiKeyId'
         lastUsedAt:
           type: string
-          example: '2025-01-01T00:00:00.000Z'
+          example: '2026-09-01T00:00:00.000Z'
         name:
           type: string
         scopes:
@@ -15638,7 +15536,7 @@ components:
       properties:
         expiresAt:
           type: string
-          example: '2025-01-01T00:00:00.000Z'
+          example: '2027-09-01T00:00:00.000Z'
         name:
           type: string
         scopes:
@@ -16238,11 +16136,14 @@ components:
           example: $argon2id$v=19$m=19456,t=2,p=1$dm9kb3BhZF9jbG91ZGxlc3MK$UgXVPrx9bS0q3FvmF3OD2UbPUKY3NxXE7S1a33fsCnk
     DeleteApiKeyRequest:
       type: object
+      description: Legacy compatibility payload, ignored by the server; use the ID
+        in the path.
       required:
       - id
       properties:
         id:
           type: string
+      deprecated: true
     DiskNotAttachableReason:
       oneOf:
       - type: object
@@ -16691,6 +16592,75 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Jwk'
+    LegacyApiKeyDto:
+      type: object
+      required:
+      - api_key
+      - hash
+      - scopes
+      - created_at
+      - last_used
+      - expires_at
+      - name
+      properties:
+        api_key:
+          type: string
+          example: example-key
+        created_at:
+          type: string
+          example: '2026-09-01T00:00:00.000Z'
+        expires_at:
+          type: string
+          example: '2027-09-01T00:00:00.000Z'
+        hash:
+          type: string
+          example: example-hash
+        last_used:
+          type: string
+          example: '2026-09-01T00:00:00.000Z'
+        name:
+          type: string
+          example: Example key
+        scopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionScope'
+          example:
+          - api_key:list
+          uniqueItems: true
+    LegacyApiKeyInfoDto:
+      type: object
+      required:
+      - userId
+      - hash
+      - scopes
+      - createdAt
+      - lastUsed
+      - expiresAt
+      - name
+      properties:
+        createdAt:
+          type: string
+          example: '2024-01-01T00:00:00Z'
+        expiresAt:
+          type: string
+          example: '2024-01-01T00:00:00Z'
+        hash:
+          type: string
+        lastUsed:
+          type: string
+          example: '2024-01-01T00:00:00Z'
+        name:
+          type: string
+        scopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionScope'
+          description: Stored scopes on list responses; current role-bounded scopes
+            on validation responses.
+          uniqueItems: true
+        userId:
+          $ref: '#/components/schemas/UserId'
     MoveClusterRequest:
       type: object
       required:
@@ -16752,7 +16722,7 @@ components:
       properties:
         expiresAt:
           type: string
-          example: '2025-01-01T00:00:00.000Z'
+          example: '2027-09-01T00:00:00.000Z'
         name:
           type: string
         scopes:
@@ -19591,20 +19561,6 @@ components:
         code:
           type: string
       additionalProperties: false
-    RefreshTokenRequest:
-      type: object
-      required:
-      - refresh_token
-      properties:
-        refresh_token:
-          type: string
-    RefreshTokenResponse:
-      type: object
-      required:
-      - access_token
-      properties:
-        access_token:
-          type: string
     RemoveStoragesRequest:
       type: object
       required:
@@ -21508,10 +21464,6 @@ components:
       type: apiKey
       in: header
       name: X-API-KEY
-    s2s_api_key:
-      type: apiKey
-      in: header
-      name: X-S2S-API-KEY
 security:
 - api_key: []
 tags:

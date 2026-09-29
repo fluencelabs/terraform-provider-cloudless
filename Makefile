@@ -3,12 +3,11 @@
 GOLANGCI_LINT_VERSION ?= v2.7.1
 
 # Where the vendored public OpenAPI spec is fetched from. The running API
-# serves its own spec (swagger-ui source). The pin normally follows mainnet,
-# because production's contract is the one the provider ships against — it
-# points at stage only while the provider is being moved onto an API version
-# production has not reached yet (graph @cloudless/fluence, node #2095).
-# Put it back to https://api.fluence.dev/... once that version ships.
-OPENAPI_URL ?= https://api.stage.fluence.dev/docs/fluence-public.yaml
+# serves its own spec (swagger-ui source). The pin follows mainnet, because
+# production's contract is the one the provider ships against. Point
+# OPENAPI_URL at stage only to look at something production has not reached
+# yet, and never commit a stage-only snapshot.
+OPENAPI_URL ?= https://api.fluence.dev/docs/fluence-public.yaml
 
 # The single quality gate. CI calls exactly this target; never assemble the
 # chain by hand.

@@ -601,9 +601,10 @@ func removeUnwantedNICs(
 	current []client.VMInterface,
 	wanted map[string]bool,
 ) (bool, error) {
+	keep := vmPrivateDefault(current)
 	var removedIDs []string
 	for _, i := range current {
-		if (i.Default && !i.IsPublic()) || wanted[apiNICKey(i)] {
+		if (keep != nil && i.ID == keep.ID) || wanted[apiNICKey(i)] {
 			continue
 		}
 		rerr := retryInterfaceOp(ctx, func(ctx context.Context) error { return c.RemoveVMInterface(ctx, vmID, i.ID) })
@@ -935,6 +936,35 @@ func matchedNICChange(p, n vmNICModel) string {
 	return ""
 }
 
+// vmPrivateDefault names the private interface that carries the VM's subnet.
+// The API's `default` flag is not a reliable finger: attaching a reserved
+// address moves it onto the public interface, and then no private interface
+// has it. What the VM cannot lose is its one private interface, so that is
+// what this returns — the flagged one when the flag is still there, otherwise
+// the only private one. Nil means the VM has no private interface at all,
+// which the API does not allow but a partial state can show.
+func vmPrivateDefault(current []client.VMInterface) *client.VMInterface {
+	var flagged, onlyPrivate *client.VMInterface
+	privates := 0
+	for i := range current {
+		if current[i].IsPublic() {
+			continue
+		}
+		privates++
+		onlyPrivate = &current[i]
+		if current[i].Default {
+			flagged = &current[i]
+		}
+	}
+	if flagged != nil {
+		return flagged
+	}
+	if privates == 1 {
+		return onlyPrivate
+	}
+	return nil
+}
+
 // repointDefaultNIC moves the VM's default interface to the subnet the plan
 // names. A live VM changes its default subnet this way — a PATCH and a
 // restart, not a new VM — as long as the target subnet is in the VM's own
@@ -951,12 +981,7 @@ func repointDefaultNIC(
 	if want == "" {
 		return false, nil
 	}
-	var dflt *client.VMInterface
-	for i := range current {
-		if current[i].Default && !current[i].IsPublic() {
-			dflt = &current[i]
-		}
-	}
+	dflt := vmPrivateDefault(current)
 	if dflt == nil || dflt.SubnetID() == want {
 		return false, nil
 	}

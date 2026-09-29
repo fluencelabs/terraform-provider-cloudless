@@ -197,13 +197,12 @@ resource "cloudless_public_ip" "edge" {
 			},
 		},
 	})
-	// Observed on stage: attaching a reserved IP applies immediately, only
-	// removing an interface flags restart_required.
-	if got := h.Mock.RestartCount(); got != 1 {
-		t.Fatalf(
-			"detaching on a live VM should restart it once, attaching not at all; got %d restarts",
-			got,
-		)
+	// Observed on stage 2026-09-28: attaching a reserved IP to a live VM
+	// raises restart_required, and so does removing an interface — each
+	// change is applied by its own restart. The earlier reading here (attach
+	// applies immediately) came from the mock, not from the API.
+	if got := h.Mock.RestartCount(); got != 2 {
+		t.Fatalf("attaching and detaching on a live VM should restart it once each; got %d restarts", got)
 	}
 }
 
@@ -522,6 +521,58 @@ func TestUnitVMNetwork_DefaultSubnetMayBeOmitted(t *testing.T) {
 					"\n  network_interface {\n    type = \"private\"\n  }\n\n  network_interface {\n    type = \"public\"\n  }\n",
 				),
 				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// Attaching a reserved address moves the API's default flag onto the public
+// interface. The private one must still be recognised as the VM's own — it
+// carries the subnet, it is repointed rather than skipped, and above all it is
+// not mistaken for a removable extra.
+func TestUnitVMNetwork_DefaultSubnetMovesWhileAReservedIPIsHeld(t *testing.T) {
+	h := tfharness.New(t)
+	defer h.Close()
+	h.Mock.SeedPublicIP("aaaa1111-aaaa-4aaa-8aaa-aaaaaaaa1111", "edge")
+	var vmID, privateIfaceID string
+
+	cfg := func(subnet string) string {
+		return vmWithNICs(`
+  network_interface {
+    type      = "private"
+    subnet_id = "` + subnet + `"
+  }
+
+  network_interface {
+    type         = "public"
+    public_ip_id = "aaaa1111-aaaa-4aaa-8aaa-aaaaaaaa1111"
+  }
+`)
+	}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: h.Factories,
+		Steps: []resource.TestStep{
+			{
+				Config: cfg(nicTestSubnet),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					captureID("cloudless_vm.app", &vmID),
+					captureAttr("cloudless_vm.app", "network_interface.0.id", &privateIfaceID),
+				),
+			},
+			{
+				Config: cfg(nicTestSubnet2),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					requireSameID("cloudless_vm.app", &vmID),
+					// The same interface, repointed — not a new one built after
+					// the only private interface was torn off the live VM.
+					requireSameAttr("cloudless_vm.app", "network_interface.0.id", &privateIfaceID),
+					resource.TestCheckResourceAttr("cloudless_vm.app", "network_interface.#", "2"),
+					resource.TestCheckResourceAttr(
+						"cloudless_vm.app", "network_interface.0.subnet_id", nicTestSubnet2),
+					resource.TestCheckResourceAttr("cloudless_vm.app", "subnet_ids.#", "1"),
+					resource.TestCheckResourceAttr("cloudless_vm.app", "subnet_ids.0", nicTestSubnet2),
+				),
 			},
 		},
 	})

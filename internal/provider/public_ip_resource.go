@@ -49,7 +49,10 @@ func (r *publicIPResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 				Validators:    []validator.String{validators.UUID()},
 			},
-			"name": schema.StringAttribute{Required: true},
+			"name": schema.StringAttribute{
+				Required:   true,
+				Validators: []validator.String{validators.ResourceName()},
+			},
 			"address_type": schema.StringAttribute{
 				Required:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},

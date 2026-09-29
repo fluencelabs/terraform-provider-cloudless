@@ -96,13 +96,27 @@ func (s *Server) addVMInterface(w http.ResponseWriter, r *http.Request, rec *vmR
 			)
 			return
 		}
+		if hasPublicInterface(rec) {
+			s.writeJSON(
+				w,
+				http.StatusUnprocessableEntity,
+				map[string]string{
+					"error": "a vm can have only one public interface",
+					"code":  "active_public_interface",
+				},
+			)
+			return
+		}
 		ni.PublicIP = *body.Kind.Public.PublicIP
 		// Observed on stage: attaching a reserved IP to a live VM makes the
-		// public interface the default one; restart_required stays false.
+		// public interface the default one and asks for a restart.
 		for i := range rec.Interfaces {
 			rec.Interfaces[i].Default = false
 		}
 		ni.Default = true
+		if rec.Status != draftStatus {
+			rec.RestartRequired = true
+		}
 		if ip, ok := s.publicIPMap[ni.PublicIP]; ok {
 			if ip.AttachedTo != "" && ip.AttachedTo != rec.ID {
 				// Observed on stage 0.11.1: "409 Conflict: public IP … is
@@ -301,4 +315,15 @@ func configureInterface(ni *vmInterfaceRecord, sg json.RawMessage, staticIPs []s
 	if staticIPs != nil {
 		ni.StaticIPs = staticIPs
 	}
+}
+
+// hasPublicInterface reports whether the VM already carries a public
+// interface; the API allows only one.
+func hasPublicInterface(rec *vmRecord) bool {
+	for i := range rec.Interfaces {
+		if rec.Interfaces[i].PublicIP != "" {
+			return true
+		}
+	}
+	return false
 }

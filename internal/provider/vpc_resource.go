@@ -50,6 +50,7 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"name": schema.StringAttribute{
 				Required:    true,
 				Description: "Human-readable VPC name.",
+				Validators:  []validator.String{validators.ResourceName()},
 			},
 			"status":     schema.StringAttribute{Computed: true},
 			"created_at": schema.StringAttribute{Computed: true},
