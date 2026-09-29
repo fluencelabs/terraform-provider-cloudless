@@ -21,8 +21,7 @@ import (
 
 // network_interface blocks of cloudless_vm. A VM's network is assembled on the
 // draft and provisioned in one apply; on a live VM only add/remove and the
-// security-group binding change in place. (graph @cloudless/fluence, nodes
-// #1809, #1811, #1812)
+// security-group binding change in place.
 
 // vmNICModel mirrors one network_interface block.
 type vmNICModel struct {
@@ -151,7 +150,7 @@ func nicAttachesExistingIP(n vmNICModel) bool {
 
 // nicKey identifies an interface by what it is bound to, not by position:
 // "prv:<subnet>" or "pub:<ip>". Owned public IPs whose ID is not yet known
-// key as "pub:new" (graph @cloudless/fluence, node #1815).
+// key as "pub:new".
 func nicKey(n vmNICModel) string {
 	if nicIsPublic(n) {
 		if knownString(n.PublicIPID) {
@@ -176,8 +175,7 @@ func apiNICKey(i client.VMInterface) string {
 
 // validateNICs checks a configured block list before any API call: exactly one
 // private default, each block either private or public, no default on a
-// public interface. Returns the index of the default block
-// (graph @cloudless/fluence, node #1816).
+// public interface. Returns the index of the default block.
 func validateNICs(nics []vmNICModel) (int, error) {
 	return validateNICLayout(nics, true)
 }
@@ -334,7 +332,6 @@ func validateNIC(i int, n vmNICModel) (bool, error) {
 // assembleDraftNICs realizes the plan's blocks on a draft VM: the server's
 // default interface is repointed to the default block's subnet, the other
 // blocks are added, then security groups and static IPs are set
-// (graph @cloudless/fluence, node #1811).
 // draftInterfaces turns the network_interface blocks into the create body's
 // interface list. A block naming an existing public IP is left out: a draft
 // creates its own addresses and can only be handed one after it is live —
@@ -517,8 +514,7 @@ func applyNICSettings(ctx context.Context, c *client.Client, vmID, ifaceID strin
 // reconcileLiveNICs brings a live VM's interfaces to the plan within what the
 // API allows: add and remove non-default interfaces, change security-group
 // bindings. Returns whether anything changed. Structural changes to matched
-// interfaces are rejected by ModifyPlan as replacements before this runs
-// (graph @cloudless/fluence, node #1812).
+// interfaces are rejected by ModifyPlan as replacements before this runs.
 func reconcileLiveNICs(ctx context.Context, c *client.Client, vmID string, prev, next []vmNICModel) (bool, error) {
 	current, err := c.ListVMInterfaces(ctx, vmID)
 	if err != nil {
@@ -552,7 +548,7 @@ func reconcileLiveNICs(ctx context.Context, c *client.Client, vmID string, prev,
 
 	// Removals go first and are waited out, so an address released here is
 	// free for whoever attaches it next (possibly another resource in the
-	// same apply; graph @cloudless/fluence, node #1824).
+	// same apply).
 	changed, err := removeUnwantedNICs(ctx, c, vmID, current, wanted)
 	changed = changed || moved
 	if err != nil {
@@ -737,7 +733,7 @@ func sameOptString(a, b *string) bool {
 // nicsFromAPI maps the API's interfaces onto blocks, keeping the order of the
 // previous blocks (matched by id, then by key) so unchanged configurations plan
 // empty; the public_ip ownership block is not observable from the API and is
-// carried over from the previous blocks (graph @cloudless/fluence, node #1815).
+// carried over from the previous blocks.
 func nicsFromAPI(prev []vmNICModel, ifaces []client.VMInterface) []vmNICModel {
 	// No blocks configured: the server default stays unmanaged and is only
 	// mirrored in the VM-level computed lists. Import surfaces interfaces
@@ -1060,8 +1056,7 @@ func listsEqual(a, b types.List) bool {
 
 // restartAndWaitReady restarts the VM and waits until it reports launched
 // again. Right after an interface change the VM can be in a transitional
-// state where the API answers 406; retry until it accepts the restart
-// (graph @cloudless/fluence, node #1804 questions the 406 contract).
+// state where the API answers 406; retry until it accepts the restart.
 func restartAndWaitReady(ctx context.Context, c *client.Client, vmID string) error {
 	var last error
 	err := waitFor(ctx, interfacePoll(), func(ctx context.Context) error {

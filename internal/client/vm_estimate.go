@@ -8,7 +8,6 @@ import (
 
 // Pricing. POST /v3/vm-estimates prices a complete explicit specification
 // without creating anything, which is what lets a cost show up in a plan.
-// (graph @cloudless/fluence, node #1790)
 
 // VMSpec is PublicVmSpec: everything the API needs to price a VM. It is not
 // the draft request — the shapes are close but the interface variant here

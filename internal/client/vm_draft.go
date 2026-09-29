@@ -14,7 +14,6 @@ import (
 // the cluster, SKU, name, keys, boot disk, data disks and interfaces, and the
 // receipt names the resources the server created for it. ProvisionVM then
 // turns the saved draft into a live VM.
-// (graph @cloudless/fluence, node #1790)
 
 // VMDraftRequest is PublicVmDraftRequest. An omitted field inherits the
 // platform default once; omitted Interfaces means one automatic interface,
@@ -62,7 +61,7 @@ func (d DraftDataDisk) MarshalJSON() ([]byte, error) {
 
 // ImageSource is the tagged PublicImageSource. Only the catalog variant is
 // built here: the http variant also needs a bootMode, and the provider has
-// nowhere to say one (graph @cloudless/fluence, node #1911).
+// nowhere to say one.
 type ImageSource struct {
 	ImageID string
 }

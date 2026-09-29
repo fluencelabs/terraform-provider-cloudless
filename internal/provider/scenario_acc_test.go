@@ -116,8 +116,7 @@ resource "cloudless_security_group" "web" {
 
 // A reserved IP moves from one live VM to another in a single apply. This is
 // the case the mock cannot prove: the API refuses to attach an IP that is
-// still held, so ordering between the two updates matters
-// (graph @cloudless/fluence, node #1824).
+// still held, so ordering between the two updates matters.
 func TestAccScenario_MoveReservedIPBetweenVMs(t *testing.T) {
 	factories := acctest.Setup(t)
 	_, subnetID := acctest.DefaultNetwork(t)

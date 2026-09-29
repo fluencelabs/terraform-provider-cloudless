@@ -11,7 +11,6 @@ import (
 // Security groups and static IPs are per interface, not per VM. Since 0.14.0
 // the view is flat — kind is a word, and the subnet, address and group are
 // fields beside it.
-// (graph @cloudless/fluence, node #1809)
 
 // Interface kinds as PublicInterfaceKind names them. A draft interface that
 // binds nothing yet is "unbound".

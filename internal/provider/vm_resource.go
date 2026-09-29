@@ -335,7 +335,6 @@ func (r *vmResource) Create(
 // refine each aspect the plan sets, then provision. A draft is free and
 // unallocated, so on any failure before provision it is discarded rather than
 // left for the user to find. Returns the VM ID once provision was accepted
-// (graph @cloudless/fluence, node #1790).
 // draftOutcome is what a created draft leaves the caller holding: its id and
 // the resources the server built for it, which nothing else will clean up.
 type draftOutcome struct {
@@ -379,7 +378,7 @@ func (r *vmResource) createDraft(
 	id := draft.ID
 	// Public IPs the draft created for itself, named by the receipt; released
 	// on discard because the draft delete's cascade is unobserved
-	// (graph @cloudless/fluence, node #1814) and a leaked address bills.
+	// and a leaked address bills.
 	ownedIPs := draft.CreatedResources.PublicIPIDs
 	// The receipt also names the storages the server built for the draft. The
 	// boot disk among them is what Delete needs to clean up, and a VM whose
@@ -600,7 +599,7 @@ func (r *vmResource) Delete(
 			resp.Diagnostics.AddError("Discard VM draft failed", err.Error())
 		}
 		// The draft discard is documented to cascade draft-created IPs, but
-		// that is unobserved (graph @cloudless/fluence, node #1814); release
+		// that is unobserved; release
 		// them the same way the live path does, tolerating "already gone".
 		r.releaseOwnedIPs(ctx, state.NICs, &resp.Diagnostics)
 		return
@@ -641,7 +640,7 @@ func (r *vmResource) Delete(
 
 // releaseOwnedIPs deletes the public IPs the VM created for itself: they
 // have no resource of their own, and terminate does not cascade them
-// (observed on stage; graph @cloudless/fluence, node #1814).
+// (observed on stage).
 func (r *vmResource) releaseOwnedIPs(
 	ctx context.Context,
 	nics []vmNICModel,
