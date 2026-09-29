@@ -14,7 +14,7 @@ import (
 // is rejected at plan time rather than failing at apply — this is the exact
 // case that bit `tf-cloudless-infra-vm-boot` (26 chars).
 func TestUnitStorage_RejectsTooLongName(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{

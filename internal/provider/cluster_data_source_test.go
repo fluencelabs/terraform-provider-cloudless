@@ -10,7 +10,7 @@ import (
 )
 
 func TestUnitClusterDataSource_FilterByRegion(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	h.Mock.SeedDatacenter("dc-de", "DE", "FRA", "fra-1")
 	h.Mock.SeedDatacenter("dc-pl", "PL", "WAW", "waw-1")
@@ -38,7 +38,7 @@ output "city" { value = data.cloudless_cluster.de.city_code }
 }
 
 func TestUnitClusterDataSource_AmbiguousErrors(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 	h.Mock.SeedDatacenter("dc-de1", "DE", "FRA", "fra-1")
 	h.Mock.SeedDatacenter("dc-de2", "DE", "BER", "ber-1")

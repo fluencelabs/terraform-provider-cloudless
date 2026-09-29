@@ -34,6 +34,5 @@ resource "cloudless_public_ip" "edge" {
 - `created_at` (String)
 - `id` (String) The ID of this resource.
 - `status` (String)
-- `user_id` (String)
 
 

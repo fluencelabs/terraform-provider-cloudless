@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  lint:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,41 +15,10 @@ jobs:
         with:
           go-version: "1.25"
           check-latest: true
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.7.1
-
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-          check-latest: true
-      - name: Build
-        run: go build ./...
-      - name: Vet
-        run: go vet ./...
-      - name: Test
-        run: go test ./... -count=1 -timeout 5m
+      # One gate, shared with local development: `make check` runs gofmt,
+      # golangci-lint, vet, build, unit tests and the docs staleness check.
+      - name: Gate
+        run: make check
         env:
           # Acceptance tests are explicitly disabled in CI per spec D4.
           TF_ACC: ""
-      - name: Gofmt check
-        run: |
-          out=$(gofmt -l .)
-          if [ -n "$out" ]; then
-            echo "Files need gofmt:"
-            echo "$out"
-            exit 1
-          fi
-
-      - name: Docs stale check
-        run: |
-          go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs generate --provider-name cloudless
-          if ! git diff --exit-code docs/; then
-            echo "docs/ is stale — run 'make docs' and commit the result"
-            exit 1
-          fi

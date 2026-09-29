@@ -23,6 +23,23 @@ func captureID(addr string, out *string) resource.TestCheckFunc {
 	}
 }
 
+// requireSameAttr pairs with captureAttr: it tells a change applied in place
+// from one applied by destroying and rebuilding, when both end in the same
+// shape.
+func requireSameAttr(addr, key string, want *string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		rs, ok := s.RootModule().Resources[addr]
+		if !ok {
+			return fmt.Errorf("resource %s not found in state", addr)
+		}
+		if got := rs.Primary.Attributes[key]; got != *want {
+			return fmt.Errorf("%s %s changed from %q to %q; it was applied by rebuilding, not in place",
+				addr, key, *want, got)
+		}
+		return nil
+	}
+}
+
 // requireSameID asserts that the resource's current ID equals *want — i.e.
 // that a smart-Update path did not silently fall back to recreate.
 func requireSameID(addr string, want *string) resource.TestCheckFunc {
@@ -39,7 +56,7 @@ func requireSameID(addr string, want *string) resource.TestCheckFunc {
 }
 
 func TestUnitVM_CreateMinimal(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -53,7 +70,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_vm" "app" {
@@ -76,7 +93,7 @@ resource "cloudless_vm" "app" {
 }
 
 func TestUnitVM_DataDiskIDsSmartUpdate(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	var initialVMID string
@@ -92,7 +109,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_storage" "data1" {
@@ -124,7 +141,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_storage" "data1" {
@@ -164,7 +181,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_storage" "data2" {
@@ -201,7 +218,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_storage" "data1" {
@@ -241,7 +258,7 @@ resource "cloudless_storage" "boot" {
   storage_type = "NVME"
   volume_gb    = 40
   replicated   = false
-  os_image     = "https://example.com/img.qcow2"
+  image_id     = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }
 
 resource "cloudless_storage" "data1" {
@@ -271,7 +288,7 @@ resource "cloudless_vm" "app" {
 }
 
 func TestUnitVM_PartialUpdateRefreshesState(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -293,6 +310,41 @@ func TestUnitVM_PartialUpdateRefreshesState(t *testing.T) {
 				Config:    vmPartialUpdateRotateConfig(),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("cloudless_vm.app", "data_disk_ids.#", "1"),
+				),
+			},
+		},
+	})
+}
+
+// cloud-init reaches the draft, and the VM reports carrying it. The content
+// is never returned by the API, so has_cloud_init is all there is to check.
+func TestUnitVM_CloudInit(t *testing.T) {
+	h := tfharness.New(t)
+	defer h.Close()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: h.Factories,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "cloudless_vm" "app" {
+  cluster_id       = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  name             = "app"
+  configuration_id = "cfcfcfcf-cfcf-4cfc-8cfc-cfcfcfcfcfcf"
+
+  boot_disk {
+    volume_gb = 40
+    image_id  = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+  }
+
+  cloud_init = <<-EOT
+    #cloud-config
+    packages: [htop]
+  EOT
+}
+`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("cloudless_vm.app", "has_cloud_init", "true"),
 				),
 			},
 		},

@@ -4,6 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/url"
+	"sort"
+	"syscall"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -91,14 +96,6 @@ func stringFromPtr(p *string) types.String {
 	return types.StringValue(*p)
 }
 
-// boolFromPtr converts a *bool from the API into a types.Bool.
-func boolFromPtr(p *bool) types.Bool {
-	if p == nil {
-		return types.BoolNull()
-	}
-	return types.BoolValue(*p)
-}
-
 // toStringList wraps a []string as a slice of types.String. Used by data
 // source models that hold list-of-string attributes as []types.String for
 // historical reasons; new resources should prefer types.List for Computed
@@ -110,10 +107,6 @@ func toStringList(in []string) []types.String {
 	}
 	return out
 }
-
-// importIDParts is the number of colon-separated fields in a composite
-// "<a>:<b>" resource import ID.
-const importIDParts = 2
 
 // pollOptions controls a wait loop. All resources use the same cadence today;
 // expose this so individual resources can extend it later.
@@ -148,11 +141,13 @@ func pollUntilReady[T any](
 	label string,
 ) (T, error) {
 	var last T
+	var blip transientWindow
 	err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
 		got, err := get(ctx)
 		if err != nil {
-			return err
+			return blip.absorb(err)
 		}
+		blip.clear()
 		last = got
 		s := status(got)
 		if isReady(s) {
@@ -164,6 +159,85 @@ func pollUntilReady[T any](
 		return nil
 	})
 	return last, err
+}
+
+// isTransient reports whether err is a transport failure (connection reset,
+// timeout) rather than an API answer; polls ride those out instead of failing
+// an apply that the API itself has not refused.
+func isTransient(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var ae *client.APIError
+	if errors.As(err, &ae) {
+		return false
+	}
+	var uerr *url.Error
+	var nerr net.Error
+	return errors.As(err, &uerr) || errors.As(err, &nerr) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// interfacePoll bounds the wait for a live VM to leave a transitional state
+// or for a moving IP to be released: minutes, not the half hour a provision
+// may take.
+func interfacePoll() pollOptions {
+	return pollOptions{Timeout: interfacePollTimeout, Interval: defaultPollInterval}
+}
+
+const interfacePollTimeout = 5 * time.Minute
+
+// retryTransient runs fn, retrying transport failures within the poll budget;
+// an API answer (success or error) ends the loop at once.
+func retryTransient(ctx context.Context, fn func(context.Context) error) error {
+	var last error
+	var blip transientWindow
+	err := waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
+		last = fn(ctx)
+		if last != nil && isTransient(last) {
+			return blip.absorb(last)
+		}
+		return errStopPolling
+	})
+	if err != nil {
+		return err
+	}
+	return last
+}
+
+// transientWindow bounds how long consecutive transport failures are ridden
+// out: a blip is absorbed, a dead endpoint (wrong FLUENCE_ENDPOINT, DNS gone,
+// API down) surfaces with its cause after transientBudget rather than as a
+// bare timeout at the end of the whole poll.
+type transientWindow struct {
+	since time.Time
+}
+
+const transientBudget = 3 * time.Minute
+
+func (w *transientWindow) absorb(err error) error {
+	if !isTransient(err) {
+		return err
+	}
+	if w.since.IsZero() {
+		w.since = time.Now()
+		return nil
+	}
+	if time.Since(w.since) > transientBudget {
+		return fmt.Errorf("API unreachable for %s: %w", transientBudget, err)
+	}
+	return nil
+}
+
+func (w *transientWindow) clear() { w.since = time.Time{} }
+
+// sortedCopy returns a sorted copy of in.
+func sortedCopy(in []string) []string {
+	out := make([]string, len(in))
+	copy(out, in)
+	sort.Strings(out)
+	return out
 }
 
 // diffStrings compares two string slices as sets and returns the elements only
@@ -222,14 +296,16 @@ func pollUntilGone[T any](
 	status func(T) string,
 	label string,
 ) error {
+	var blip transientWindow
 	return waitFor(ctx, defaultPoll(), func(ctx context.Context) error {
 		got, err := get(ctx)
 		if err != nil {
 			if client.IsNotFound(err) {
 				return errStopPolling
 			}
-			return err
+			return blip.absorb(err)
 		}
+		blip.clear()
 		s := status(got)
 		if isRemoved(s) {
 			return errStopPolling
@@ -270,6 +346,9 @@ func waitFor(ctx context.Context, opts pollOptions, fn func(context.Context) err
 
 // Resource status strings reported by the Fluence API.
 const (
+	statusDraft = "draft"
+	// statusImported marks a freshly imported VM until its first Read.
+	statusImported   = "imported"
 	statusFailed     = "failed"
 	statusReady      = "ready"
 	statusLaunched   = "launched"
@@ -279,6 +358,19 @@ const (
 
 // terminalFailure returns true for status strings the API uses to signal a
 // non-recoverable end state.
+// isSettled reports whether a VM's status is one the API will not move on
+// its own. A flag read while the VM is still reconciling can be the value
+// from before the change (observed by review on the /v2 lifecycle: updating
+// with the previous restartRequired).
+func isSettled(status string) bool {
+	switch status {
+	case "new", "launching", "updating", "restarting", "softRebooting", "suspending", "terminating":
+		return false
+	default:
+		return true
+	}
+}
+
 func terminalFailure(status string) bool {
 	return status == statusFailed
 }
@@ -338,4 +430,20 @@ func resolveClusterID(
 	}
 
 	return vpc.ClusterID
+}
+
+// exactlyOne reports whether a singular data source found its one match, and
+// otherwise says which way it failed: nothing to pick, or too much to pick
+// from — with the candidates named, since narrowing needs to know them.
+func exactlyOne(n int, what string, names []string, diags *diag.Diagnostics) bool {
+	switch n {
+	case 1:
+		return true
+	case 0:
+		diags.AddError("No matching "+what, "no "+what+" matched the supplied filters")
+	default:
+		diags.AddError("Ambiguous "+what+" filter",
+			"more than one "+what+" matches; narrow the filter. matches: "+joinComma(names))
+	}
+	return false
 }

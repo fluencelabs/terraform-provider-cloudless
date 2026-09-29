@@ -6,6 +6,17 @@ import (
 )
 
 // vpcRecord is the mock's in-memory shape for a VPC.
+// clusterOfVPC returns the cluster a VPC lives on, as the API derives it for
+// subnets and security groups. Unknown VPCs (tests using literal UUIDs) fall
+// back to the draft default cluster so responses stay contract-valid.
+// Caller holds s.mu.
+func (s *Server) clusterOfVPC(vpcID string) string {
+	if v, ok := s.vpcMap[vpcID]; ok && v.ClusterID != "" {
+		return v.ClusterID
+	}
+	return defaultDraftClusterID
+}
+
 type vpcRecord struct {
 	ID, Name, ClusterID, UserID, Status string
 	EnableExternal                      *bool
@@ -20,25 +31,23 @@ func (s *Server) wireVPCs() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/vpcs", func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("/v3/vpcs", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			var body struct {
-				ClusterID      string `json:"clusterId"`
-				Name           string `json:"name"`
-				EnableExternal *bool  `json:"enableExternal,omitempty"`
+				ClusterID string `json:"clusterId"`
+				Name      string `json:"name"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			id := newID()
 			rec := &vpcRecord{
-				ID:             id,
-				Name:           body.Name,
-				ClusterID:      body.ClusterID,
-				UserID:         "test-user",
-				Status:         "ready",
-				EnableExternal: body.EnableExternal,
+				ID:        id,
+				Name:      body.Name,
+				ClusterID: body.ClusterID,
+				UserID:    "test-user",
+				Status:    "ready",
 			}
 			s.vpcMap[id] = rec
 			s.writeJSON(w, http.StatusOK, vpcWire(rec))
@@ -48,26 +57,17 @@ func (s *Server) wireVPCs() {
 			s.notFound(w, r)
 		}
 	})
-	// /v1/vpcs/delete is an exact path; ServeMux prefers exact matches over
-	// the /v1/vpcs/ prefix, so register both.
-	s.mux.HandleFunc("/v1/vpcs/delete", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			s.notFound(w, r)
+	s.mux.HandleFunc("/v3/vpcs/", func(w http.ResponseWriter, r *http.Request) {
+		// POST /v3/vpcs/{id}/subnets shares the prefix; hand it to subnets.
+		if p := splitPath(r.URL.Path); len(p) == subnetCreatePathParts && p[3] == "subnets" {
+			s.handleSubnetCreate(w, r)
 			return
 		}
-		var body struct {
-			IDs []string `json:"ids"`
+		if p := splitPath(r.URL.Path); len(p) == resourcePathParts && r.Method == http.MethodDelete {
+			s.deleteVPC(w, p[2])
+			return
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		s.mu.Lock()
-		for _, id := range body.IDs {
-			delete(s.vpcMap, id)
-		}
-		s.mu.Unlock()
-		w.WriteHeader(http.StatusOK)
-	})
-	s.mux.HandleFunc("/v1/vpcs/", func(w http.ResponseWriter, r *http.Request) {
-		// PATCH /v1/vpcs/{id}
+		// PATCH /v3/vpcs/{id}
 		if r.Method != http.MethodPatch {
 			s.notFound(w, r)
 			return
@@ -124,19 +124,13 @@ func (s *Server) handleVPCsGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func vpcWire(rec *vpcRecord) map[string]any {
-	out := map[string]any{
-		"id":           rec.ID,
-		"name":         rec.Name,
-		"clusterId":    rec.ClusterID,
-		"userId":       rec.UserID,
-		"status":       rec.Status,
-		"subnetsCount": 0,
-		"createdAt":    "2026-01-01T00:00:00Z",
+	return map[string]any{
+		"id":        rec.ID,
+		"name":      rec.Name,
+		"clusterId": rec.ClusterID,
+		"status":    rec.Status,
+		"createdAt": "2026-01-01T00:00:00Z",
 	}
-	if rec.EnableExternal != nil {
-		out["enableExternal"] = *rec.EnableExternal
-	}
-	return out
 }
 
 // SeedVPC inserts a VPC record. Tests use this to set up parent-VPC state
@@ -148,4 +142,18 @@ func (s *Server) SeedVPC(id, name, clusterID string) {
 		s.vpcMap = map[string]*vpcRecord{}
 	}
 	s.vpcMap[id] = &vpcRecord{ID: id, Name: name, ClusterID: clusterID, UserID: "test-user", Status: "ready"}
+}
+
+// deleteVPC serves DELETE /v3/vpcs/{id}.
+func (s *Server) deleteVPC(w http.ResponseWriter, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.vpcMap[id]
+	if !ok {
+		s.writeError(w, "vpc not found")
+		return
+	}
+	wire := vpcWire(rec)
+	delete(s.vpcMap, id)
+	s.writeJSON(w, http.StatusOK, wire)
 }

@@ -33,15 +33,14 @@ resource "cloudless_storage" "data" {
 
 ### Optional
 
-- `os_image` (String) URL of an OS image. Presence makes this a boot disk.
+- `image_id` (String) Catalog image this disk is built from; presence makes it a boot disk. See the cloudless_default_image data source.
 
 ### Read-Only
 
-- `attached_to` (List of String)
+- `attached_vm_ids` (List of String) VMs this disk is attached to.
+- `boot_mode` (String) Firmware the image boots with (BIOS or EFI).
 - `created_at` (String)
 - `id` (String) The ID of this resource.
-- `role` (String)
 - `status` (String)
-- `user_id` (String)
 
 

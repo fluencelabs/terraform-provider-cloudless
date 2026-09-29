@@ -10,7 +10,7 @@ import (
 )
 
 func TestUnitSecurityGroup_AllowAll(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -19,7 +19,7 @@ func TestUnitSecurityGroup_AllowAll(t *testing.T) {
 			{
 				Config: `
 resource "cloudless_security_group" "wide" {
-  cluster_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  vpc_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
   name       = "wide"
 }
 `,
@@ -34,7 +34,7 @@ resource "cloudless_security_group" "wide" {
 }
 
 func TestUnitSecurityGroup_AllowListed(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -43,7 +43,7 @@ func TestUnitSecurityGroup_AllowListed(t *testing.T) {
 			{
 				Config: `
 resource "cloudless_security_group" "web" {
-  cluster_id   = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  vpc_id   = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
   name         = "web"
   ingress_mode = "allow_listed"
   ingress {
@@ -60,7 +60,7 @@ resource "cloudless_security_group" "web" {
 }
 
 func TestUnitSecurityGroup_DenyAll(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -69,7 +69,7 @@ func TestUnitSecurityGroup_DenyAll(t *testing.T) {
 			{
 				Config: `
 resource "cloudless_security_group" "tight" {
-  cluster_id  = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  vpc_id  = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
   name        = "tight"
   egress_mode = "deny_all"
 }
@@ -81,7 +81,7 @@ resource "cloudless_security_group" "tight" {
 }
 
 func TestUnitSecurityGroup_AllowListedRequiresBlocks(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	resource.UnitTest(t, resource.TestCase{
@@ -90,7 +90,7 @@ func TestUnitSecurityGroup_AllowListedRequiresBlocks(t *testing.T) {
 			{
 				Config: `
 resource "cloudless_security_group" "broken" {
-  cluster_id   = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  vpc_id   = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
   name         = "broken"
   ingress_mode = "allow_listed"
   # No ingress blocks → should fail validation

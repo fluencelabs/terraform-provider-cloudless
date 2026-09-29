@@ -17,14 +17,14 @@ func (s *Server) wireClusters() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/clusters", func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc("/v3/clusters", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		out := []map[string]any{}
 		for _, c := range s.clusterMap {
 			out = append(out, c)
 		}
-		s.writeJSON(w, http.StatusOK, out)
+		s.writeJSON(w, http.StatusOK, map[string]any{"items": out})
 	})
 }
 
@@ -41,14 +41,14 @@ func (s *Server) wireDCs() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/datacenters", func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc("/v3/datacenters", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		out := []map[string]any{}
 		for _, d := range s.dcMap {
 			out = append(out, d)
 		}
-		s.writeJSON(w, http.StatusOK, out)
+		s.writeJSON(w, http.StatusOK, map[string]any{"items": out})
 	})
 }
 
@@ -61,7 +61,7 @@ func (s *Server) SeedCluster(id, name, dcID string) {
 	if s.clusterMap == nil {
 		s.clusterMap = map[string]map[string]any{}
 	}
-	s.clusterMap[id] = map[string]any{"id": id, "name": name, "dc_id": dcID}
+	s.clusterMap[id] = map[string]any{"id": id, "name": name, "dcId": dcID}
 }
 
 // mockDatacenterTier is the fixed tier value seeded for mock datacenter rows.
@@ -75,7 +75,7 @@ func (s *Server) SeedDatacenter(id, country, city, slug string) {
 		s.dcMap = map[string]map[string]any{}
 	}
 	s.dcMap[id] = map[string]any{
-		"id": id, "countryCode": country, "cityCode": city,
+		"id": id, "countryCode": country, "cityCode": city, "cityName": city,
 		"index": 0, "tier": mockDatacenterTier, "certifications": []string{}, "slug": slug,
 	}
 }

@@ -38,7 +38,6 @@ type sshKeyModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
 	PublicKey   types.String `tfsdk:"public_key"`
-	UserID      types.String `tfsdk:"user_id"`
 	Algorithm   types.String `tfsdk:"algorithm"`
 	Fingerprint types.String `tfsdk:"fingerprint"`
 }
@@ -71,7 +70,6 @@ func (r *sshKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"user_id":     schema.StringAttribute{Computed: true},
 			"algorithm":   schema.StringAttribute{Computed: true},
 			"fingerprint": schema.StringAttribute{Computed: true},
 		},
@@ -117,7 +115,6 @@ func (r *sshKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	plan.ID = types.StringValue(out.ID)
-	plan.UserID = types.StringValue(out.UserID)
 	plan.Algorithm = types.StringValue(out.Algorithm)
 	plan.Fingerprint = types.StringValue(out.Fingerprint)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
@@ -170,7 +167,6 @@ func (r *sshKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	if !samePublicKeyBody(out.PublicKey, state.PublicKey.ValueString()) {
 		state.PublicKey = types.StringValue(out.PublicKey)
 	}
-	state.UserID = types.StringValue(out.UserID)
 	state.Algorithm = types.StringValue(out.Algorithm)
 	state.Fingerprint = types.StringValue(out.Fingerprint)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)

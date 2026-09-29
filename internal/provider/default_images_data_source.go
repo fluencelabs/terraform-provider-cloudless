@@ -21,9 +21,9 @@ type defaultImageModel struct {
 	Slug         types.String `tfsdk:"slug"`
 	Name         types.String `tfsdk:"name"`
 	Distribution types.String `tfsdk:"distribution"`
-	DownloadURL  types.String `tfsdk:"download_url"`
+	BootMode     types.String `tfsdk:"boot_mode"`
+	IsDefault    types.Bool   `tfsdk:"is_default"`
 	Username     types.String `tfsdk:"username"`
-	IconURL      types.String `tfsdk:"icon_url"`
 	CreatedAt    types.String `tfsdk:"created_at"`
 	UpdatedAt    types.String `tfsdk:"updated_at"`
 }
@@ -52,9 +52,9 @@ func (d *defaultImagesDS) Schema(_ context.Context, _ datasource.SchemaRequest, 
 						"slug":         schema.StringAttribute{Computed: true},
 						"name":         schema.StringAttribute{Computed: true},
 						"distribution": schema.StringAttribute{Computed: true},
-						"download_url": schema.StringAttribute{Computed: true},
+						"boot_mode":    schema.StringAttribute{Computed: true},
+						"is_default":   schema.BoolAttribute{Computed: true},
 						"username":     schema.StringAttribute{Computed: true},
-						"icon_url":     schema.StringAttribute{Computed: true},
 						"created_at":   schema.StringAttribute{Computed: true},
 						"updated_at":   schema.StringAttribute{Computed: true},
 					},
@@ -85,9 +85,7 @@ func (d *defaultImagesDS) Read(ctx context.Context, _ datasource.ReadRequest, re
 			Slug:         types.StringValue(i.Slug),
 			Name:         types.StringValue(i.Name),
 			Distribution: types.StringValue(i.Distribution),
-			DownloadURL:  types.StringValue(i.DownloadURL),
 			Username:     types.StringValue(i.Username),
-			IconURL:      types.StringValue(i.IconURL),
 			CreatedAt:    types.StringValue(i.CreatedAt),
 			UpdatedAt:    types.StringValue(i.UpdatedAt),
 		})

@@ -15,14 +15,20 @@ import (
 func publicIPDestroy() func(*terraform.State) error {
 	c := acctest.RealClient()
 	return acctest.CheckDestroy(c, "cloudless_public_ip", func(ctx context.Context, id string) error {
-		_, err := c.GetPublicIP(ctx, id)
-		return err
+		got, err := c.GetPublicIP(ctx, id)
+		if err != nil {
+			return err
+		}
+		return acctest.GoneIf(got.Status, nil)
 	})
 }
 
 func TestAccPublicIP_RealAPI(t *testing.T) {
 	factories := acctest.Setup(t)
-	name := "tf-acc-pip-" + tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
+	// A v3 name is at most 25 characters, so the rename has to fit too.
+	suffix := tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
+	name := "tf-acc-pip-" + suffix
+	renamed := "tf-acc-pip2-" + suffix
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: factories,
@@ -30,12 +36,15 @@ func TestAccPublicIP_RealAPI(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: fmt.Sprintf(`
-data "cloudless_cluster" "main" {
-  region = "DE"
+data "cloudless_clusters" "all" {}
+
+locals {
+  # The acceptance account may live in any region; take the first cluster it can see.
+  cluster_id = data.cloudless_clusters.all.clusters[0].id
 }
 
 resource "cloudless_public_ip" "edge" {
-  cluster_id   = data.cloudless_cluster.main.id
+  cluster_id   = local.cluster_id
   name         = %q
   address_type = "V4"
 }
@@ -48,15 +57,20 @@ resource "cloudless_public_ip" "edge" {
 			},
 			{
 				Config: fmt.Sprintf(`
-data "cloudless_cluster" "main" { region = "DE" }
+data "cloudless_clusters" "all" {}
+
+locals {
+  # The acceptance account may live in any region; take the first cluster it can see.
+  cluster_id = data.cloudless_clusters.all.clusters[0].id
+}
 
 resource "cloudless_public_ip" "edge" {
-  cluster_id   = data.cloudless_cluster.main.id
+  cluster_id   = local.cluster_id
   name         = %q
   address_type = "V4"
 }
-`, name+"-renamed"),
-				Check: resource.TestCheckResourceAttr("cloudless_public_ip.edge", "name", name+"-renamed"),
+`, renamed),
+				Check: resource.TestCheckResourceAttr("cloudless_public_ip.edge", "name", renamed),
 			},
 			{
 				ResourceName:      "cloudless_public_ip.edge",

@@ -15,8 +15,11 @@ import (
 func storageDestroy() func(*terraform.State) error {
 	c := acctest.RealClient()
 	return acctest.CheckDestroy(c, "cloudless_storage", func(ctx context.Context, id string) error {
-		_, err := c.GetStorage(ctx, id)
-		return err
+		got, err := c.GetStorage(ctx, id)
+		if err != nil {
+			return err
+		}
+		return acctest.GoneIf(got.Status, nil)
 	})
 }
 
@@ -30,12 +33,15 @@ func TestAccStorage_RealAPI(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: fmt.Sprintf(`
-data "cloudless_cluster" "main" {
-  region = "DE"
+data "cloudless_clusters" "all" {}
+
+locals {
+  # The acceptance account may live in any region; take the first cluster it can see.
+  cluster_id = data.cloudless_clusters.all.clusters[0].id
 }
 
 resource "cloudless_storage" "data" {
-  cluster_id   = data.cloudless_cluster.main.id
+  cluster_id   = local.cluster_id
   name         = %q
   storage_type = "NVME"
   volume_gb    = 100
@@ -45,17 +51,19 @@ resource "cloudless_storage" "data" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("cloudless_storage.data", "name", name),
 					resource.TestCheckResourceAttr("cloudless_storage.data", "volume_gb", "100"),
-					resource.TestCheckResourceAttr("cloudless_storage.data", "role", "DATA"),
 				),
 			},
 			{
 				Config: fmt.Sprintf(`
-data "cloudless_cluster" "main" {
-  region = "DE"
+data "cloudless_clusters" "all" {}
+
+locals {
+  # The acceptance account may live in any region; take the first cluster it can see.
+  cluster_id = data.cloudless_clusters.all.clusters[0].id
 }
 
 resource "cloudless_storage" "data" {
-  cluster_id   = data.cloudless_cluster.main.id
+  cluster_id   = local.cluster_id
   name         = %q
   storage_type = "NVME"
   volume_gb    = 200

@@ -31,7 +31,7 @@ func sampleRule() client.SecurityGroupRule {
 func marshalIngressField(t *testing.T, rules client.SecurityGroupRules) (bool, json.RawMessage) {
 	t.Helper()
 	req := client.CreateSecurityGroupRequest{
-		ClusterID:    "11111111-1111-1111-1111-111111111111",
+		VPCID:        "11111111-1111-1111-1111-111111111111",
 		Name:         "sg",
 		IngressRules: client.RulesToCreateField(rules),
 		EgressRules:  client.RulesToCreateField(client.SecurityGroupRules{Mode: "allowAll"}),

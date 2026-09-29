@@ -1,19 +1,19 @@
 ---
 page_title: "cloudless_security_group Resource - cloudless"
 description: |-
-    A security group on a Fluence cluster. Per-direction mode controls how rule blocks are interpreted.
+    A security group in a Fluence VPC. Per-direction mode controls how rule blocks are interpreted.
 ---
 
 # cloudless_security_group (Resource)
 
-A security group on a Fluence cluster. Per-direction mode controls how rule blocks are interpreted.
+A security group in a Fluence VPC. Per-direction mode controls how rule blocks are interpreted.
 
 ## Example Usage
 
 ```terraform
 resource "cloudless_security_group" "web" {
-  cluster_id = data.cloudless_cluster.main.id
-  name       = "web"
+  vpc_id = cloudless_vpc.main.id
+  name   = "web"
 
   ingress_mode = "allow_listed"
   ingress {
@@ -36,8 +36,8 @@ resource "cloudless_security_group" "web" {
 
 ### Required
 
-- `cluster_id` (String)
 - `name` (String)
+- `vpc_id` (String) VPC the security group belongs to. The cluster is derived from it.
 
 ### Optional
 
@@ -48,10 +48,10 @@ resource "cloudless_security_group" "web" {
 
 ### Read-Only
 
+- `cluster_id` (String)
 - `id` (String) The ID of this resource.
 - `status` (String)
 - `user_id` (String)
-- `vpc_id` (String)
 
 <a id="nestedblock--egress"></a>
 ### Nested Schema for `egress`

@@ -25,16 +25,10 @@ resource "cloudless_vpc" "main" {
 - `cluster_id` (String) Cluster (UUID) the VPC belongs to.
 - `name` (String) Human-readable VPC name.
 
-### Optional
-
-- `enable_external` (Boolean) If true the VPC has external network connectivity.
-
 ### Read-Only
 
 - `created_at` (String)
 - `id` (String) The ID of this resource.
 - `status` (String)
-- `subnets_count` (Number)
-- `user_id` (String)
 
 

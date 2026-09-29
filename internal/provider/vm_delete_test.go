@@ -31,7 +31,7 @@ func captureAttr(addr, attr string, out *string) resource.TestCheckFunc {
 // so vmResource.Delete must delete the boot disk storage explicitly. Without
 // that cleanup the storage volume is orphaned and keeps billing.
 func TestUnitVM_Delete_RemovesInlineBootDisk(t *testing.T) {
-	h := tfharness.New()
+	h := tfharness.New(t)
 	defer h.Close()
 
 	var bootDiskID string
@@ -57,11 +57,9 @@ resource "cloudless_vm" "app" {
   configuration_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
   boot_disk {
-    name         = "boot"
-    storage_type = "NVME"
-    volume_gb    = 40
-    replicated   = false
-    os_image     = "https://example.com/img.qcow2"
+    name      = "boot"
+    volume_gb = 40
+    image_id  = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
   }
 }
 `,

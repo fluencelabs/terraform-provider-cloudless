@@ -15,13 +15,17 @@ import (
 func subnetDestroy() func(*terraform.State) error {
 	c := acctest.RealClient()
 	return acctest.CheckDestroy(c, "cloudless_subnet", func(ctx context.Context, id string) error {
-		_, err := c.GetSubnet(ctx, id)
-		return err
+		got, err := c.GetSubnet(ctx, id)
+		if err != nil {
+			return err
+		}
+		return acctest.GoneIf(got.Status, nil)
 	})
 }
 
 func TestAccSubnet_RealAPI(t *testing.T) {
 	factories := acctest.Setup(t)
+	acctest.SkipUnlessVPCWrite(t, acctest.FirstClusterID(t))
 	vpcName := "tf-acc-vpc-" + tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
 	subnetName := "tf-acc-subnet-" + tfacctest.RandStringFromCharSet(8, tfacctest.CharSetAlphaNum)
 
@@ -31,18 +35,22 @@ func TestAccSubnet_RealAPI(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: fmt.Sprintf(`
-data "cloudless_cluster" "main" {
-  region = "DE"
+data "cloudless_clusters" "all" {}
+
+locals {
+  # The acceptance account may live in any region; take the first cluster it can see.
+  cluster_id = data.cloudless_clusters.all.clusters[0].id
 }
 
 resource "cloudless_vpc" "main" {
-  cluster_id = data.cloudless_cluster.main.id
+  cluster_id = local.cluster_id
   name       = %q
 }
 
 resource "cloudless_subnet" "s" {
-  vpc_id = cloudless_vpc.main.id
-  name   = %q
+  vpc_id    = cloudless_vpc.main.id
+  name      = %q
+  ipv4_cidr = "10.42.0.0/24"
 }
 `, vpcName, subnetName),
 				Check: resource.ComposeAggregateTestCheckFunc(

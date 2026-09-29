@@ -3,8 +3,11 @@
 package acctest
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -37,4 +40,88 @@ func RealClient() *client.Client {
 		os.Getenv("FLUENCE_API_KEY"),
 		client.WithUserAgent("terraform-provider-cloudless/acc"),
 	)
+}
+
+// DefaultNetwork returns the account's VPC and default subnet for tests that
+// need an existing network: API keys cannot create VPCs or subnets (vodopad
+// refuses vpc:write / subnet:write on keys), so the topology must pre-exist.
+// FLUENCE_ACC_VPC_ID / FLUENCE_ACC_SUBNET_ID override the discovery.
+func DefaultNetwork(t *testing.T) (string, string) {
+	t.Helper()
+	c := RealClient()
+	ctx := context.Background()
+	if subnetID := os.Getenv("FLUENCE_ACC_SUBNET_ID"); subnetID != "" {
+		if vpcID := os.Getenv("FLUENCE_ACC_VPC_ID"); vpcID != "" {
+			return vpcID, subnetID
+		}
+		sn, err := c.GetSubnet(ctx, subnetID)
+		if err != nil {
+			t.Fatalf("FLUENCE_ACC_SUBNET_ID %s: %v", subnetID, err)
+		}
+		return sn.VPCID, sn.ID
+	}
+	subnets, err := c.ListSubnets(ctx)
+	if err != nil {
+		t.Fatalf("list subnets: %v", err)
+	}
+	// Prefer the VPC's default subnet; otherwise the first ready one. A
+	// pinned FLUENCE_ACC_VPC_ID restricts the choice to that VPC.
+	pinnedVPC := os.Getenv("FLUENCE_ACC_VPC_ID")
+	var pick *client.Subnet
+	for i := range subnets {
+		sn := &subnets[i]
+		if sn.Status != "ready" || (pinnedVPC != "" && sn.VPCID != pinnedVPC) {
+			continue
+		}
+		if sn.IsDefault {
+			pick = sn
+			break
+		}
+		if pick == nil {
+			pick = sn
+		}
+	}
+	if pick == nil {
+		t.Skip("no ready subnet on the account; create a VPC and subnet in pult or set FLUENCE_ACC_SUBNET_ID")
+		return "", "" // unreachable: Skip stops the test
+	}
+	return pick.VPCID, pick.ID
+}
+
+// probeNameSuffixMod keeps the probe VPC's name inside the 25-character limit.
+const probeNameSuffixMod = 1_000_000_000
+
+// SkipUnlessVPCWrite skips the test when the key cannot create VPCs. The
+// probe VPC is deleted again when the key turns out to be allowed.
+func SkipUnlessVPCWrite(t *testing.T, clusterID string) {
+	t.Helper()
+	// The probe creates a real VPC and deletes it again: body validation runs
+	// before the permission check on this route, so a deliberately invalid
+	// body answers 400 whether or not the key may write, and cannot tell the
+	// two apart (observed on stage 2026-09-11).
+	ctx := context.Background()
+	name := fmt.Sprintf("tf-acc-probe-%d", time.Now().UnixNano()%probeNameSuffixMod)
+	vpc, err := RealClient().CreateVPC(ctx, client.CreateVPCRequest{ClusterID: clusterID, Name: name})
+	if client.IsForbidden(err) {
+		t.Skip("API key lacks vpc:write (reissue the stage key with vpc:write and subnet:write); " +
+			"VPC and subnet resources cannot be exercised")
+	}
+	if err != nil {
+		t.Fatalf("vpc:write probe: %v", err)
+	}
+	t.Cleanup(func() {
+		if derr := RealClient().DeleteVPC(context.Background(), vpc.ID); derr != nil {
+			t.Logf("probe VPC %s (%s) left behind: %v", vpc.ID, name, derr)
+		}
+	})
+}
+
+// FirstClusterID returns the first cluster the account can see.
+func FirstClusterID(t *testing.T) string {
+	t.Helper()
+	clusters, err := RealClient().ListClusters(context.Background())
+	if err != nil || len(clusters) == 0 {
+		t.Fatalf("list clusters: %v (got %d)", err, len(clusters))
+	}
+	return clusters[0].ID
 }

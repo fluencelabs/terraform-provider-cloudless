@@ -28,10 +28,8 @@ func (s *Server) wireSSHKeys() {
 	}
 	s.mu.Unlock()
 
-	s.mux.HandleFunc("/v1/ssh_keys", s.handleSSHKeysCollection)
-	// /v1/ssh_keys/delete is an exact path; ServeMux prefers exact matches over
-	// any prefix, so register it explicitly.
-	s.mux.HandleFunc("/v1/ssh_keys/delete", s.handleSSHKeysBulkDelete)
+	s.mux.HandleFunc("/v3/ssh-keys", s.handleSSHKeysCollection)
+	s.mux.HandleFunc("/v3/ssh-keys/", s.handleSSHKeyItem)
 }
 
 func (s *Server) handleSSHKeysCollection(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +55,7 @@ func (s *Server) createSSHKey(w http.ResponseWriter, r *http.Request) {
 	// of the same material returns 409.
 	for _, k := range s.sshKeyMap {
 		if sameSSHKeyBody(k.PublicKey, body.PublicKey) {
-			s.writeJSON(w, http.StatusConflict, map[string]string{"error": "SshKey already exists"})
+			s.writeJSON(w, http.StatusConflict, map[string]string{"error": "SshKey already exists", "code": "conflict"})
 			return
 		}
 	}
@@ -72,7 +70,7 @@ func (s *Server) createSSHKey(w http.ResponseWriter, r *http.Request) {
 		Fingerprint: "SHA256:" + hex.EncodeToString(sum[:8]),
 	}
 	s.sshKeyMap[id] = rec
-	s.writeJSON(w, http.StatusOK, sshKeyWire(rec))
+	s.writeJSON(w, http.StatusCreated, sshKeyWire(rec))
 }
 
 func (s *Server) listSSHKeys(w http.ResponseWriter, r *http.Request) {
@@ -98,23 +96,6 @@ func (s *Server) listSSHKeys(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleSSHKeysBulkDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.notFound(w, r)
-		return
-	}
-	var body struct {
-		IDs []string `json:"ids"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	s.mu.Lock()
-	for _, id := range body.IDs {
-		delete(s.sshKeyMap, id)
-	}
-	s.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
-}
-
 // sameSSHKeyBody compares two OpenSSH public keys by algorithm + base64 body,
 // ignoring any trailing comment — mirroring how the real API dedups keys.
 func sameSSHKeyBody(a, b string) bool {
@@ -129,10 +110,28 @@ func sameSSHKeyBody(a, b string) bool {
 func sshKeyWire(rec *sshKeyRecord) map[string]any {
 	return map[string]any{
 		"id":          rec.ID,
-		"userId":      rec.UserID,
 		"name":        rec.Name,
 		"publicKey":   rec.PublicKey,
 		"algorithm":   rec.Algorithm,
 		"fingerprint": rec.Fingerprint,
 	}
+}
+
+// handleSSHKeyItem serves DELETE /v3/ssh-keys/{id}.
+func (s *Server) handleSSHKeyItem(w http.ResponseWriter, r *http.Request) {
+	parts := splitPath(r.URL.Path)
+	if len(parts) != resourcePathParts || r.Method != http.MethodDelete {
+		s.notFound(w, r)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.sshKeyMap[parts[2]]
+	if !ok {
+		s.writeError(w, "ssh key not found")
+		return
+	}
+	wire := sshKeyWire(rec)
+	delete(s.sshKeyMap, parts[2])
+	s.writeJSON(w, http.StatusOK, wire)
 }

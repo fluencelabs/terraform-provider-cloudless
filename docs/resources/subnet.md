@@ -29,13 +29,14 @@ resource "cloudless_subnet" "private" {
 ### Optional
 
 - `cluster_id` (String) Cluster the subnet lives on. If unset, derived from vpc_id's cluster.
-- `ipv4_cidr` (String) Optional IPv4 CIDR (e.g. 10.0.0.0/24).
-- `ipv6_cidr` (String) Optional IPv6 CIDR (e.g. 2001:db8::/64).
+- `egress` (Boolean) Outbound internet access; enabled by default. An IPv6-only subnet must set it to false — the API does not support egress there.
+- `ipv4_cidr` (String) IPv4 CIDR (e.g. 10.0.0.0/24). A subnet needs at least one of ipv4_cidr and ipv6_cidr.
+- `ipv6_cidr` (String) IPv6 CIDR (e.g. 2001:db8::/64). A subnet needs at least one of ipv4_cidr and ipv6_cidr.
+- `is_default` (Boolean) Whether this is its VPC's default subnet — the one a VM lands on with no network_interface block. Setting it true moves the flag here from whichever subnet held it. The flag cannot be cleared, only moved: make another subnet the default instead.
 
 ### Read-Only
 
 - `id` (String) The ID of this resource.
 - `status` (String)
-- `user_id` (String)
 
 
