@@ -50,6 +50,9 @@ func (s *Server) createVMDraft(w http.ResponseWriter, r *http.Request) {
 		DataDisks       []draftDiskRef        `json:"dataDisks"`
 		Interfaces      *[]draftInterfaceBody `json:"interfaces"`
 	}
+	if !s.requireIdempotencyKey(w, r) {
+		return
+	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
 	s.mu.Lock()
@@ -503,4 +506,19 @@ func (s *Server) serveLiveVMRoute(w http.ResponseWriter, r *http.Request, rec *v
 		return false
 	}
 	return true
+}
+
+// requireIdempotencyKey enforces the header the API declares required on the
+// creating verbs. The contract middleware validates bodies only, so without
+// this the gate cannot see a missing key — which is how the provider shipped
+// one and found out on a live call.
+func (s *Server) requireIdempotencyKey(w http.ResponseWriter, r *http.Request) bool {
+	if r.Header.Get("Idempotency-Key") != "" {
+		return true
+	}
+	s.writeJSON(w, http.StatusBadRequest, map[string]string{
+		"error": "Idempotency-Key header is required",
+		"code":  "bad_request",
+	})
+	return false
 }

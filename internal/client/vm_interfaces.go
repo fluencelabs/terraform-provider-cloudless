@@ -14,10 +14,7 @@ import (
 
 // Interface kinds as PublicInterfaceKind names them. A draft interface that
 // binds nothing yet is "unbound".
-const (
-	interfaceKindPrivate = "private"
-	interfaceKindPublic  = "public"
-)
+const interfaceKindPublic = "public"
 
 // VMInterface mirrors PublicInterfaceView.
 type VMInterface struct {

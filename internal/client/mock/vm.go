@@ -34,7 +34,7 @@ func (s *Server) wireVMs() {
 func (s *Server) handleVMVerb(w http.ResponseWriter, r *http.Request, rec *vmRecord, verb string) {
 	switch {
 	case verb == "terminate" && r.Method == http.MethodPost:
-		s.terminateVM(w, rec)
+		s.terminateVM(w, r, rec)
 	case (verb == "restart" || verb == "softreboot") && r.Method == http.MethodPost:
 		s.restartVM(w, rec)
 	case verb == interfacesVerb && r.Method == http.MethodGet:
@@ -46,7 +46,10 @@ func (s *Server) handleVMVerb(w http.ResponseWriter, r *http.Request, rec *vmRec
 
 // terminateVM answers 202 with the TerminatedVm receipt: the id, the status
 // the request was accepted in, and the resources that outlive the VM.
-func (s *Server) terminateVM(w http.ResponseWriter, rec *vmRecord) {
+func (s *Server) terminateVM(w http.ResponseWriter, r *http.Request, rec *vmRecord) {
+	if !s.requireIdempotencyKey(w, r) {
+		return
+	}
 	s.mu.Lock()
 	retained := map[string]any{"storageIds": []string{}, "publicIpIds": []string{}}
 	delete(s.vmMap, rec.ID)

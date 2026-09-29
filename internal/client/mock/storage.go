@@ -101,7 +101,7 @@ func (s *Server) listStorages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleStorageItem serves PATCH /v1/storages/{id}.
+// handleStorageItem serves PATCH and DELETE on /v3/storages/{id}.
 func (s *Server) handleStorageItem(w http.ResponseWriter, r *http.Request) {
 	parts := splitPath(r.URL.Path)
 	if len(parts) != resourcePathParts {

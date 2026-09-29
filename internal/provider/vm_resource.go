@@ -593,7 +593,7 @@ func (r *vmResource) Delete(
 
 	id := state.ID.ValueString()
 	// A draft that never reached provision holds no cluster resources and is
-	// discarded through /v3; a live VM is terminated through /v2.
+	// discarded through /v3; a live VM is terminated through /v3.
 	if state.Status.ValueString() == statusDraft {
 		if err := r.c.DeleteVMDraft(ctx, id); err != nil && !client.IsNotFound(err) {
 			resp.Diagnostics.AddError("Discard VM draft failed", err.Error())

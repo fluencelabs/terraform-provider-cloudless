@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -115,6 +118,7 @@ func (d *vmEstimateDS) Schema(
 			"network_interface": schema.ListNestedBlock{
 				Description: "Interfaces to price; at least one is required. A public one carries an address, " +
 					"which is what makes it cost something.",
+				Validators: []validator.List{listvalidator.SizeAtLeast(1)},
 				NestedObject: schema.NestedBlockObject{
 					Attributes: map[string]schema.Attribute{
 						"type": schema.StringAttribute{

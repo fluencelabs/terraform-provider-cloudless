@@ -198,6 +198,35 @@ func truncate(s string, n int) string {
 // ---------- Pagination ----------
 
 // PaginationInfo mirrors the API's PaginationInfo schema.
+// maxPerPage is the largest page /v3 list endpoints accept. They default to
+// 50, so a caller that never asks sees only the first 50 records and is told
+// nothing about the rest.
+const maxPerPage = 200
+
+// eachPage walks a paginated /v3 list to the end. The page count comes from
+// the response, so a list that grows mid-walk still terminates.
+func eachPage[T any](ctx context.Context, c *Client, path string, q url.Values) ([]T, error) {
+	if q == nil {
+		q = url.Values{}
+	}
+	var all []T
+	for page := uint64(1); ; page++ {
+		q.Set("page", strconv.FormatUint(page, 10))
+		q.Set("perPage", strconv.Itoa(maxPerPage))
+		var resp struct {
+			Items      []T            `json:"items"`
+			Pagination PaginationInfo `json:"pagination"`
+		}
+		if err := c.do(ctx, http.MethodGet, path, q, nil, &resp); err != nil {
+			return nil, err
+		}
+		all = append(all, resp.Items...)
+		if len(resp.Items) == 0 || page >= uint64(resp.Pagination.TotalPages) {
+			return all, nil
+		}
+	}
+}
+
 type PaginationInfo struct {
 	TotalRecords    uint64 `json:"totalRecords"`
 	FilteredRecords uint64 `json:"filteredRecords"`
@@ -252,12 +281,11 @@ func (c *Client) GetSSHKey(ctx context.Context, id string) (*SSHKey, error) {
 
 // ListSSHKeys returns all SSH keys registered for the authenticated user. Used
 // to recover from a create conflict by matching an existing key by body.
+// ListSSHKeys returns every key, walking the pages: adopting a key after a 409
+// means finding it by its material, and a key beyond the first page would look
+// like no key at all.
 func (c *Client) ListSSHKeys(ctx context.Context) ([]SSHKey, error) {
-	var resp sshKeysListResponse
-	if err := c.do(ctx, http.MethodGet, "/v3/ssh-keys", nil, nil, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Items, nil
+	return eachPage[SSHKey](ctx, c, "/v3/ssh-keys", nil)
 }
 
 func (c *Client) DeleteSSHKey(ctx context.Context, id string) error {
@@ -297,15 +325,6 @@ func (c *Client) CreateVPC(ctx context.Context, req CreateVPCRequest) (*VPC, err
 		return nil, err
 	}
 	return &out, nil
-}
-
-// ListVPCs returns the first page of the account's VPCs.
-func (c *Client) ListVPCs(ctx context.Context) ([]VPC, error) {
-	var resp vpcsListResponse
-	if err := c.do(ctx, http.MethodGet, "/v3/vpcs", nil, nil, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Items, nil
 }
 
 func (c *Client) GetVPC(ctx context.Context, id string) (*VPC, error) {
@@ -361,7 +380,8 @@ type CreateSubnetRequest struct {
 }
 
 type UpdateSubnetRequest struct {
-	Name *string `json:"name,omitempty"`
+	Name   *string `json:"name,omitempty"`
+	Egress *bool   `json:"egress,omitempty"`
 }
 
 type subnetsListResponse struct {
@@ -378,12 +398,10 @@ func (c *Client) CreateSubnet(ctx context.Context, vpcID string, req CreateSubne
 }
 
 // ListSubnets returns the first page of the account's subnets.
+// ListSubnets returns every subnet, walking the pages: the data source filters
+// in memory, so a subnet left on page two would simply be invisible.
 func (c *Client) ListSubnets(ctx context.Context) ([]Subnet, error) {
-	var resp subnetsListResponse
-	if err := c.do(ctx, http.MethodGet, "/v3/subnets", nil, nil, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Items, nil
+	return eachPage[Subnet](ctx, c, "/v3/subnets", nil)
 }
 
 func (c *Client) GetSubnet(ctx context.Context, id string) (*Subnet, error) {
@@ -960,23 +978,18 @@ func (c *Client) DeleteStorage(ctx context.Context, id string) error {
 
 // ---------- Public IPs ----------
 
+// PublicIP mirrors PublicIpDto. The holding VM is named by id alone; the
+// id+name reference and the owning user the /v1 payload carried are gone.
 type PublicIP struct {
-	ID          string       `json:"id"`
-	UserID      string       `json:"userId"`
-	ClusterID   string       `json:"clusterId"`
-	Name        string       `json:"name"`
-	AddressType string       `json:"addressType"`
-	Address     *string      `json:"address,omitempty"`
-	Status      string       `json:"status"`
-	AttachedTo  *VMReference `json:"attachedTo,omitempty"`
-	CreatedAt   string       `json:"createdAt"`
-}
-
-// VMReference is the UserVmReference the API surfaces where a resource is
-// attached to a VM (id + name, so callers avoid a second lookup).
-type VMReference struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string  `json:"id"`
+	ClusterID   string  `json:"clusterId"`
+	Name        string  `json:"name"`
+	AddressType string  `json:"addressType"`
+	Address     *string `json:"address,omitempty"`
+	Status      string  `json:"status"`
+	VMID        *string `json:"vmId"`
+	CreatedAt   string  `json:"createdAt"`
+	UpdatedAt   string  `json:"updatedAt"`
 }
 
 type CreatePublicIPRequest struct {

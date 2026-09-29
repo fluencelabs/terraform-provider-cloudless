@@ -28,7 +28,6 @@ type publicIPModel struct {
 	Address     types.String `tfsdk:"address"`
 	Status      types.String `tfsdk:"status"`
 	AttachedTo  types.String `tfsdk:"attached_to"`
-	UserID      types.String `tfsdk:"user_id"`
 	CreatedAt   types.String `tfsdk:"created_at"`
 }
 
@@ -67,7 +66,6 @@ func (r *publicIPResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Computed:    true,
 				Description: "ID of the VM the public IP is attached to, if any.",
 			},
-			"user_id":    schema.StringAttribute{Computed: true},
 			"created_at": schema.StringAttribute{Computed: true},
 		},
 	}
@@ -200,10 +198,6 @@ func (r *publicIPResource) fill(m *publicIPModel, p *client.PublicIP) {
 	m.AddressType = types.StringValue(p.AddressType)
 	m.Address = stringFromPtr(p.Address)
 	m.Status = types.StringValue(p.Status)
-	m.AttachedTo = types.StringNull()
-	if p.AttachedTo != nil {
-		m.AttachedTo = types.StringValue(p.AttachedTo.ID)
-	}
-	m.UserID = types.StringValue(p.UserID)
+	m.AttachedTo = stringFromPtr(p.VMID)
 	m.CreatedAt = types.StringValue(p.CreatedAt)
 }

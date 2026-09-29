@@ -26,7 +26,11 @@ compute marketplace.
 | `cloudless_cluster` | Look up exactly one cluster by `region` / `city_code` / `name` / `id`. Errors on ambiguity. |
 | `cloudless_clusters` | List clusters with optional `regions` / `city_codes` / `names` AND-composed filters. |
 | `cloudless_vm_configurations` | All VM presets (CPU/RAM). |
+| `cloudless_vm_configuration` | Look up exactly one preset by `slug` / `vcpu` / `ram_gb` / `name`. Errors on ambiguity. |
 | `cloudless_default_images` | Curated default OS images. |
+| `cloudless_default_image` | Look up exactly one image, usually by `slug`. Errors on ambiguity. |
+| `cloudless_subnets` | List subnets, optionally by cluster or VPC. `is_default` names the one a VM lands on with no `network_interface` block. |
+| `cloudless_vm_estimate` | Price a VM before creating it: hourly USD for a complete specification, visible in `terraform plan`. |
 
 ## Provider configuration
 

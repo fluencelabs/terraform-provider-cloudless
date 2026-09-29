@@ -28,8 +28,8 @@ func TestRestartVM_ClearsRestartRequired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add public interface: %v", err)
 	}
-	// Observed on stage: attaching applies at once; removing an interface is
-	// what flags the VM restart_required.
+	// Observed on stage: both attaching and removing an interface flag the VM
+	// restart_required — each change is applied by its own restart.
 	if err = c.RemoveVMInterface(ctx, vm.ID, iface.ID); err != nil {
 		t.Fatalf("remove public interface: %v", err)
 	}

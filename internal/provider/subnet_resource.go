@@ -97,12 +97,9 @@ func (r *subnetResource) Schema(
 				Validators:  []validator.String{validators.CIDR("ipv6")},
 			},
 			"egress": schema.BoolAttribute{
-				Optional: true,
-				Computed: true,
-				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.RequiresReplaceIfConfigured(),
-					boolplanmodifier.UseStateForUnknown(),
-				},
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
 				Description: "Outbound internet access; enabled by default. " +
 					"An IPv6-only subnet must set it to false — the API does not support egress there.",
 			},
@@ -207,11 +204,15 @@ func (r *subnetResource) Create(
 		resp.Diagnostics.AddError("Waiting for subnet failed", err.Error())
 		return
 	}
-	if out, err = r.applyDefault(ctx, plan.IsDefault, out); err != nil {
-		resp.Diagnostics.AddError("Set default subnet failed", err.Error())
-		return
+	// The subnet exists from here on. Whatever the default-flag step does,
+	// state must name it, or destroy cannot reach it and the next apply
+	// collides with its CIDR.
+	defaulted, derr := r.applyDefault(ctx, plan.IsDefault, out)
+	if derr != nil {
+		resp.Diagnostics.AddError("Set default subnet failed", derr.Error())
+	} else {
+		out = defaulted
 	}
-
 	r.fill(&plan, out)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -308,8 +309,17 @@ func (r *subnetResource) Update(
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	updReq := client.UpdateSubnetRequest{}
+	changed := false
 	if !plan.Name.Equal(state.Name) {
-		updReq := client.UpdateSubnetRequest{Name: nullableString(plan.Name)}
+		updReq.Name = nullableString(plan.Name)
+		changed = true
+	}
+	if !plan.Egress.Equal(state.Egress) && !plan.Egress.IsUnknown() {
+		updReq.Egress = nullableBool(plan.Egress)
+		changed = true
+	}
+	if changed {
 		got, err := r.c.UpdateSubnet(ctx, state.ID.ValueString(), updReq)
 		if err != nil {
 			resp.Diagnostics.AddError("Update subnet failed", err.Error())

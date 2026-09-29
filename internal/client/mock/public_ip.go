@@ -87,7 +87,7 @@ func (s *Server) listPublicIPs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handlePublicIPItem serves PATCH /v1/public_ips/{id}.
+// handlePublicIPItem serves PATCH /v3/public-ips/{id}.
 func (s *Server) handlePublicIPItem(w http.ResponseWriter, r *http.Request) {
 	parts := splitPath(r.URL.Path)
 	if len(parts) != resourcePathParts {

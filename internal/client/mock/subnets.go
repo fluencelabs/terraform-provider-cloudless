@@ -52,8 +52,8 @@ func (s *Server) wireSubnets() {
 // subnetCreatePathParts is the segment count of /v3/vpcs/{vpc_id}/subnets.
 const subnetCreatePathParts = 4
 
-// handleSubnetCreate serves POST /v1/vpcs/{vpc_id}/subnets; dispatched from
-// the /v1/vpcs/ handler in vpcs.go.
+// handleSubnetCreate serves POST /v3/vpcs/{vpc_id}/subnets; dispatched from
+// the /v3/vpcs/ handler in vpcs.go.
 func (s *Server) handleSubnetCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.notFound(w, r)

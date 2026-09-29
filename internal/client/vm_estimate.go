@@ -47,27 +47,13 @@ func (s VMSpec) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// SpecBootDisk is PublicBootDisk: an existing storage, or a new disk of
-// VolumeGb built from Source.
-type SpecBootDisk struct {
-	StorageID string
-	VolumeGb  uint32
-	Name      string
-	Source    ImageSource
-}
+// SpecBootDisk is PublicBootDisk — the same two variants as the draft's boot
+// disk, so it is the same type; the estimate and the create must encode a disk
+// identically or a price answers for a VM nobody asked for.
+type SpecBootDisk = DraftBootDisk
 
-func (d SpecBootDisk) MarshalJSON() ([]byte, error) {
-	if d.StorageID != "" {
-		return json.Marshal(map[string]any{"kind": "existing", "storageId": d.StorageID})
-	}
-	out := map[string]any{"kind": "new", "volumeGb": d.VolumeGb, "source": d.Source}
-	if d.Name != "" {
-		out["name"] = d.Name
-	}
-	return json.Marshal(out)
-}
-
-// SpecDataDisk is PublicDataDisk: an existing storage, or a new disk to price.
+// SpecDataDisk is PublicDataDisk. Only the existing-disk variant is built,
+// as in the draft; a new disk would be priced by volume and replication.
 type SpecDataDisk struct {
 	StorageID  string
 	VolumeGb   uint32
@@ -77,7 +63,7 @@ type SpecDataDisk struct {
 
 func (d SpecDataDisk) MarshalJSON() ([]byte, error) {
 	if d.StorageID != "" {
-		return json.Marshal(map[string]any{"kind": "existing", "storageId": d.StorageID})
+		return DraftDataDisk{StorageID: d.StorageID}.MarshalJSON()
 	}
 	out := map[string]any{"kind": "new", "volumeGb": d.VolumeGb, "replicated": d.Replicated}
 	if d.Name != "" {
@@ -136,16 +122,6 @@ type VMEstimate struct {
 func (c *Client) EstimateVM(ctx context.Context, spec VMSpec) (*VMEstimate, error) {
 	var out VMEstimate
 	if err := c.do(ctx, http.MethodPost, "/v3/vm-estimates", nil, spec, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// EstimateExistingVM prices a VM that already exists, draft or live
-// (GET /v3/vms/{id}/estimate).
-func (c *Client) EstimateExistingVM(ctx context.Context, vmID string) (*VMEstimate, error) {
-	var out VMEstimate
-	if err := c.do(ctx, http.MethodGet, "/v3/vms/"+vmID+"/estimate", nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
